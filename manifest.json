@@ -1,0 +1,33 @@
+{
+  "manifest_version": 3,
+  "name": "Truck Manager Autoline",
+  "description": "Automatización para Autoline.es",
+  "version": "1.0",
+
+  "action": {
+    "default_popup": "popup.html"
+  },
+
+  "permissions": [
+    "activeTab",
+    "scripting",
+    "storage"
+  ],
+
+  "host_permissions": [
+    "https://autoline.es/*",
+    "https://truckocasion.com/*"
+  ],
+
+  "background": {
+    "service_worker": "background.js"
+  },
+
+  "content_scripts": [
+    {
+      "matches": ["https://autoline.es/*"],
+      "js": ["content-script.js"],
+      "run_at": "document_end"
+    }
+  ]
+}
