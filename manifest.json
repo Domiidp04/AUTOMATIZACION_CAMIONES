@@ -8,15 +8,19 @@
     "default_popup": "popup.html"
   },
 
-  "permissions": [
-    "activeTab",
-    "scripting",
-    "storage"
-  ],
+"permissions": [
+  "activeTab",
+  "scripting",
+  "tabs",
+  "storage"
+],
 
   "host_permissions": [
-    "https://autoline.es/*",
-    "https://truckocasion.com/*"
+    "*://*.autoline.es/*",
+    "*://autoline.es/*",
+    "https://truckocasion.com/*",
+      "*://autoline.es/*"
+
   ],
 
   "background": {
@@ -25,7 +29,7 @@
 
   "content_scripts": [
     {
-      "matches": ["https://autoline.es/*"],
+      "matches": ["*://*.autoline.es/*","*://autoline.es/*"],
       "js": ["content-script.js"],
       "run_at": "document_end"
     }

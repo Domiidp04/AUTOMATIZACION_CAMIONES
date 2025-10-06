@@ -64,6 +64,20 @@ function _txt(el) {
     return (el?.textContent || el?.value || '').replace(/\s+/g, ' ').trim().toLowerCase();
 }
 
+// Evitar ejecutar en iframes: solo top window
+try {
+    if (window.top !== window.self) {
+      // Estamos en un iframe → no correr automatización aquí
+      // (Opcional: puedes dejar un console.debug y salir)
+      console.debug('[Autoline] Iframe detectado: content-script no se inicializa en iframes.');
+      throw new Error('AUTOLINE_IFRAME_ABORT');
+    }
+  } catch (e) {
+    // En algunos sandbox, acceder a window.top puede lanzar → abortamos
+    return;
+  }
+  
+
 // =========================
 // Núcleo de la automatización
 // =========================
@@ -91,10 +105,17 @@ function _txt(el) {
             this._watcher = null;
             this._lastUrl = location.href;
 
+            // Concurrency/debounce guards
+            this._startInFlight = false;
+            this._resumeScheduled = false;
+            this._executing = false;
+
             // Mensajería / estado
             this._setupMsgListener();
             this._startNavigationWatcher();
             this._loadStateAndMaybeResume();
+            this._nextStepTimer = null;
+            this._completed = false;
 
             // Bloqueo de Enter para evitar envíos/búsquedas
             this._keydownBlocker = (e) => {
@@ -114,7 +135,17 @@ function _txt(el) {
                 try {
                     switch (message.type) {
                         case 'PING':
-                            sendResponse({ success: true, message: 'content-script alive' });
+                            sendResponse({
+                                success: true,
+                                message: 'content-script alive',
+                                status: {
+                                    isRunning: this.isRunning,
+                                    currentStep: this.currentStep,
+                                    totalSteps: STEPS.length,
+                                    currentUrl: window.location.href,
+                                    timestamp: Date.now()
+                                }
+                            });
                             break;
 
                         case 'START_AUTOMATION':
@@ -122,20 +153,31 @@ function _txt(el) {
                             this.isQueueProcessing = !!message.isQueueProcessing;
                             this.queueInfo = message.queueInfo || null;
 
+                            // Debounce: si ya estamos arrancando o corriendo, evitar duplicado
+                            if (this._startInFlight || this.isRunning) {
+                                this._log('⚠️ Inicio duplicado ignorado', 'warning');
+                                sendResponse?.({ success: true, message: 'already-running' });
+                                return true;
+                            }
+
                             // Reset suave al inicio de cada vehículo en cola
                             if (this.isQueueProcessing && this.queueInfo?.justStarted) {
                                 this._log('🔄 Nuevo vehículo en cola: reseteando estado…', 'info');
                                 this.queueInfo.justStarted = false;
+                                this._startInFlight = true;
                                 chrome.storage.local.remove(['auto_running', 'auto_step', 'auto_data'])
                                     .then(() => this._start())
                                     .then(() => sendResponse?.({ success: true }))
-                                    .catch(e => sendResponse?.({ success: false, error: e?.message }));
+                                    .catch(e => sendResponse?.({ success: false, error: e?.message }))
+                                    .finally(() => { this._startInFlight = false; });
                                 return true;
                             }
 
+                            this._startInFlight = true;
                             this._start()
                                 .then(() => sendResponse?.({ success: true }))
-                                .catch(e => sendResponse?.({ success: false, error: e?.message }));
+                                .catch(e => sendResponse?.({ success: false, error: e?.message }))
+                                .finally(() => { this._startInFlight = false; });
                             return true;
 
                         case 'STOP_AUTOMATION':
@@ -196,7 +238,20 @@ function _txt(el) {
                         history.length > 1 ? history.back() : location.reload();
                         return;
                     }
-                    if (this.isRunning) await this._loadStateAndMaybeResume();
+                    // Si llegamos a /my/sales/ (tras Aplazar), completar y notificar una sola vez
+                    try {
+                        if (this.isRunning && /\/my\/sales\/?$/.test(new URL(location.href).pathname)) {
+                            await this._complete();
+                            return;
+                        }
+                    } catch {}
+                    if (this.isRunning) {
+                        if (this._resumeScheduled) return;
+                        this._resumeScheduled = true;
+                        setTimeout(async () => {
+                            try { await this._loadStateAndMaybeResume(); } finally { this._resumeScheduled = false; }
+                        }, 1000);
+                    }
                 }
             }, 1500);
         }
@@ -209,6 +264,8 @@ function _txt(el) {
                 throw new Error('Not on autoline.es');
             }
             this.isRunning = true;
+            this._completed = false;
+            if (this._nextStepTimer) { clearTimeout(this._nextStepTimer); this._nextStepTimer = null; }
             if (this.currentStep < 0 || this.currentStep >= STEPS.length) this.currentStep = 0;
             await this._saveState();
 
@@ -234,6 +291,8 @@ function _txt(el) {
         async _executeStep() {
             if (!this.isRunning) return;
             if (this.currentStep >= STEPS.length) return this._complete();
+            if (this._executing) return; // evitar doble ejecución por watcher + timer
+            this._executing = true;
 
             const step = STEPS[this.currentStep];
             this._status(`Paso ${this.currentStep + 1}/${STEPS.length}: ${step.desc}`, 'running');
@@ -259,9 +318,11 @@ function _txt(el) {
 
                     if (step.waitNav) {
                         this._log('⏳ Esperando navegación…', 'info');
-                        setTimeout(() => this._executeStep(), 3000);
+                        if (this._nextStepTimer) { clearTimeout(this._nextStepTimer); }
+                        this._nextStepTimer = setTimeout(() => { this._nextStepTimer = null; this._executeStep(); }, 3000);
                     } else {
-                        setTimeout(() => this._executeStep(), 600);
+                        if (this._nextStepTimer) { clearTimeout(this._nextStepTimer); }
+                        this._nextStepTimer = setTimeout(() => { this._nextStepTimer = null; this._executeStep(); }, 600);
                     }
                 } else {
                     this._log(`❌ Error en: ${step.desc}`, 'error');
@@ -270,10 +331,14 @@ function _txt(el) {
             } catch (e) {
                 this._log(`❌ Excepción en paso: ${e?.message || e}`, 'error');
                 await this._stop();
+            } finally {
+                this._executing = false;
             }
         }
 
         async _complete() {
+            if (this._completed) return;
+            this._completed = true;
             this.isRunning = false;
             await chrome.storage.local.set({ auto_running: false, auto_step: STEPS.length });
 
@@ -281,8 +346,8 @@ function _txt(el) {
             this._progress(STEPS.length, STEPS.length);
             this._send('AUTOMATION_COMPLETE', {});
 
-            // Limpieza final
-            await chrome.storage.local.remove(['auto_running', 'auto_step', 'auto_data']);
+            // Limpieza final (pausa corta para que el popup lea estado si quiere)
+            setTimeout(() => { chrome.storage.local.remove(['auto_running', 'auto_step', 'auto_data']); }, 400);
         }
 
         // ---------- Acciones por paso ----------

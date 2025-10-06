@@ -9,21 +9,6 @@
 // Utilidades / helpers (globales)
 // =========================
 
-// 🛡️ Protección segura: no correr dentro de iframes ni crear duplicados
-try {
-  if (window !== top) {
-    console.debug("[Autoline] Iframe detectado, no ejecuto content-script.");
-    return;
-  }
-} catch { /* cross-origin: sigue, pero sin error */ }
-
-if (window.__autolineRunning) {
-  console.debug("[Autoline] Script ya activo, aborto nueva instancia.");
-  return;
-}
-window.__autolineRunning = true;
-
-
 // Preparación del DOM (versión estable)
 function _preparaWebLegacy() {
   // Quitar wrappers de Select2 para que los <select> reales queden accesibles
@@ -209,12 +194,18 @@ function _txt(el) {
                   this.currentStep = 0;
                   this.vehicleData = this.vehicleData || null;
 
+                  // 🔁 Reset de banderas de sesión/fin para el nuevo vehículo
+                  this._completedOnce = false;
+                  this.sessionId = `${Date.now()}-${Math.random()
+                    .toString(16)
+                    .slice(2)}`;
+
                   await chrome.storage.local.remove([
                     "auto_running",
                     "auto_step",
                     "auto_data",
                   ]);
-                  await this._delay(300); // pequeña pausa para asegurar limpieza
+                  await this._delay(300);
                 }
 
                 // 🚀 Iniciar la automatización normalmente
@@ -397,29 +388,33 @@ function _txt(el) {
     }
 
     async _complete() {
-  if (this._completedOnce) return;
-  this._completedOnce = true;
+      if (this._completedOnce) return;
+      this._completedOnce = true;
 
-  this.isRunning = false;
-  await chrome.storage.local.set({ auto_running: false, auto_step: 0 });
+      this.isRunning = false;
+      await chrome.storage.local.set({ auto_running: false, auto_step: 0 });
 
-  this._status('✅ Vehículo completado', 'success');
-  this._progress(5, 5);
+      this._status("✅ Vehículo completado", "success");
+      this._progress(5, 5);
 
-  const sessionId = this.sessionId || `${Date.now()}-${Math.random().toString(16).slice(2)}`;
-  this._send('AUTOMATION_COMPLETE', { sessionId });
+      const sessionId =
+        this.sessionId ||
+        `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+      this._send("AUTOMATION_COMPLETE", { sessionId });
 
-  // 🧹 Reset completo para siguiente vehículo
-  await chrome.storage.local.remove(['auto_running', 'auto_step', 'auto_data']);
-  this.currentStep = 0;
-  this.vehicleData = null;
-  this._log('🔁 Listo para siguiente vehículo', 'info');
-  // 🔇 Eliminar listeners antiguos en caso de reinyección
-chrome.runtime.onMessage.removeListener(this._setupMsgListener);
-window.removeEventListener('keydown', this._keydownBlocker, true);
-
-}
-
+      // 🧹 Reset completo para siguiente vehículo
+      await chrome.storage.local.remove([
+        "auto_running",
+        "auto_step",
+        "auto_data",
+      ]);
+      this.currentStep = 0;
+      this.vehicleData = null;
+      this._log("🔁 Listo para siguiente vehículo", "info");
+      try {
+        delete window.__autolineRunning;
+      } catch {}
+    }
 
     // ---------- Acciones por paso ----------
     async _clickPublicar() {

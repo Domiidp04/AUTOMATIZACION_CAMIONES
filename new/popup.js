@@ -748,37 +748,3 @@ chrome.runtime.onMessage.addListener(function(message, sender, sendResponse) {
             break;
     }
 });
-
-async function startNextInQueue(nextVehicleData, idx, total) {
-    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-    if (!tab?.url?.includes('autoline.es')) {
-      log('❌ Debes estar en autoline.es', 'error'); return;
-    }
-  
-    // 1) Comprobar que el content-script está vivo
-    const ping = await chrome.tabs.sendMessage(tab.id, { type: 'PING' }).catch(()=>null);
-    if (!ping?.success) { log('❌ Content-script no responde (PING)', 'error'); return; }
-  
-    // 2) Enviar datos del vehículo
-    await chrome.tabs.sendMessage(tab.id, { type: 'SET_VEHICLE_DATA', data: nextVehicleData }).catch(()=>null);
-    await delay(500);
-  
-    // 3) Iniciar con bandera justStarted=true
-    await chrome.tabs.sendMessage(tab.id, {
-      type: 'START_AUTOMATION',
-      isQueueProcessing: true,
-      queueInfo: { current: idx+1, total, vehicleCode: nextVehicleData?.codigo, justStarted: true }
-    }).catch(()=>null);
-  
-    log(`🚀 Iniciado vehículo ${idx+1}/${total}`, 'info');
-  }
-  
-  function delay(ms){ return new Promise(r=>setTimeout(r,ms)); }
-  
-  // Listener del popup para cuando el content diga que terminó
-  chrome.runtime.onMessage.addListener((msg) => {
-    if (msg.type === 'AUTOMATION_COMPLETE') {
-      // Espera un pelín antes de saltar al siguiente
-      setTimeout(() => advanceQueueSafely(), 600);
-    }
-  });
