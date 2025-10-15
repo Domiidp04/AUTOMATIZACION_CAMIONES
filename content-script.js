@@ -1006,6 +1006,44 @@ function _txt(el) {
       return null;
     }
 
+    // Helpers locales recomendados dentro de la clase (si no los tienes ya)
+_isEnabled(el){
+  if (!el) return false;
+  const st = getComputedStyle(el);
+  return !el.disabled && !el.getAttribute("disabled") && st.pointerEvents !== "none" && !el.classList.contains("disabled") && !el.hasAttribute("aria-disabled");
+}
+_forceClick(el){
+  try{
+    el.scrollIntoView({behavior:"instant", block:"center"});
+  }catch{}
+  try{
+    el.dispatchEvent(new MouseEvent("mousedown",{bubbles:true,cancelable:true,view:window}));
+    el.dispatchEvent(new MouseEvent("mouseup",{bubbles:true,cancelable:true,view:window}));
+    el.dispatchEvent(new MouseEvent("click",{bubbles:true,cancelable:true,view:window}));
+    return true;
+  }catch{
+    try{ el.click(); return true; }catch{ return false; }
+  }
+}
+_findPublishButton(){
+  let btn = document.querySelector('#submitDepot, button[name="submitDepot"][type="submit"]');
+  if (!btn){
+    btn = Array.from(document.querySelectorAll('button[type="submit"], input[type="submit"], button'))
+      .find(b => /publicar mi anuncio/i.test((b.textContent || b.value || "").trim()));
+  }
+  return btn || null;
+}
+async _waitForPublishEnabled(timeout=6000){
+  const t0 = Date.now();
+  while(Date.now()-t0 < timeout){
+    const btn = this._findPublishButton();
+    if (btn && this._isVisible(btn) && this._isEnabled(btn)) return btn;
+    await this._wait(120);
+  }
+  return null;
+}
+
+
     // ---- Ciclo principal (3 pasos) ----
     async _start() {
       // europa-camiones.com y subdominios via-mobilis (p. ej., my.via-mobilis.com)
@@ -1052,20 +1090,12 @@ function _txt(el) {
 
       // SOLO 5 PASOS: publicar → categoría → datos → validar → publicar final
       const STEPS = [
-        { name: "nueva", desc: "Abrir “Publicar un anuncio”", waitNav: true },
-        {
-          name: "categoria",
-          desc: "Elegir “Cabeza tractora → Estándar”",
-          waitNav: true,
-        },
-        { name: "datos", desc: "Rellenar formulario", waitNav: false },
-        {
-          name: "validar",
-          desc: "Validar todas las secciones",
-          waitNav: false,
-        },
-        { name: "publicar", desc: "Publicar mi anuncio", waitNav: true },
-      ];
+  { name:"nueva",     desc:'Abrir “Publicar un anuncio”', waitNav:true },
+  { name:"categoria", desc:'Elegir “Cabeza tractora → Estándar”', waitNav:true },
+  { name:"datos",     desc:'Rellenar formulario', waitNav:false },
+  { name:"validar",   desc:'Validar todas las secciones', waitNav:true }, // ← ahora true
+];
+
 
       if (this.currentStep >= STEPS.length) return this._complete();
 
@@ -1159,77 +1189,6 @@ function _txt(el) {
     }
 
     // ====== PASO 2: Categoría Estándar (Cabeza tractora) ======
-    async _seleccionarCategoria() {
-      // En la parrilla (home): enlace "Estándar"
-      const sel =
-        'a.background-color-1-with-transparency-light-hover[href*="/vehicle/new?"][href*="cat=31"][href*="var=68"]';
-      const link = await this._waitFor(sel, 15000);
-
-      if (link) {
-        this._log("Click en categoría: Estándar (Cabeza tractora)", "info");
-        this._click(link);
-        await this._wait(300);
-
-        // Si no navegó (SPA), forzamos su href absoluto
-        const href = link.getAttribute("href");
-        const absolute = href?.startsWith("http")
-          ? href
-          : new URL(href, location.origin).href;
-
-        // Ver si ya estamos en /vehicle/new o /vehicle/{id}/edit
-        const urlOkSoon = await this._waitForUrl(
-          /\/vehicle\/(new|[^/]+\/edit)/i,
-          2500
-        );
-        if (!urlOkSoon) {
-          this._log(
-            "No hubo navegación tras el click, forzando location.assign()…",
-            "warning"
-          );
-          location.assign(absolute);
-        }
-      } else {
-        // Puede que ya vengas directo al formulario (como en tu captura /vehicle/{id}/edit?...).
-        this._log(
-          "No veo el link de 'Estándar'; verifico si ya estoy en el formulario…",
-          "info"
-        );
-      }
-
-      // Espera robusta a FORMULARIO o LOGIN
-      const winner = await Promise.race([
-        this._waitForForm(12000), // cualquier form con campos reales
-        this._waitFor('input[name="email"], input[type="email"]', 12000), // login
-      ]);
-
-      // ¿Login?
-      if (
-        winner &&
-        winner.matches &&
-        (winner.matches('input[name="email"]') ||
-          winner.matches('input[type="email"]'))
-      ) {
-        this._status("Necesitas iniciar sesión en my.via-mobilis.com", "error");
-        this._log("🛑 Redirigido a login. Inicia sesión y relanza.", "error");
-        return false;
-      }
-
-      // Confirmar por URL + #de campos
-      const urlOk = /\/vehicle\/(new|[^/]+\/edit)/i.test(location.pathname);
-      const formOk = this._hasUsableForm();
-      if (!urlOk || !formOk) {
-        this._log(
-          `No detecto formulario aún. urlOk=${urlOk} formOk=${formOk}`,
-          "error"
-        );
-        return false;
-      }
-
-      return true;
-    }
-
-    // ====== PASO 3: Insertar datos ======
-// Paso 2 ultrarrápido: ir a "Estándar" sin pensarlo
 async _seleccionarCategoria(){
   // 0) Si ya estamos en el formulario, salta YA
   if (/\/vehicle\/(new|[^/]+\/edit)/i.test(location.pathname) && this._hasUsableForm()){
@@ -1273,6 +1232,243 @@ async _seleccionarCategoria(){
 }
 
 
+    // ====== PASO 3: Insertar datos ======
+    async _insertarDatos() {
+      const vd = this.vehicleData;
+      if (!vd) {
+        this._log("⚠️ Sin datos de vehículo", "error");
+        return false;
+      }
+
+      // Asegurar que el form está montado (IDs pueden tardar)
+      const hasForm = document.querySelector(
+        '#energie, #Km, #prix, form[action*="vehicle"]'
+      );
+      if (!hasForm) {
+        this._log(
+          "⚠️ No veo el formulario todavía. Reintentando breve…",
+          "warning"
+        );
+        const again = await this._waitFor(
+          '#energie, #Km, #prix, form[action*="vehicle"]',
+          6000
+        );
+        if (!again) {
+          this._log("❌ Formulario no disponible", "error");
+          return false;
+        }
+      }
+
+      // Pequeño “wake up”: foco en primer campo
+      const first =
+        document.querySelector("#energie") ||
+        document.querySelector("#Km") ||
+        document.querySelector("form input, form select, form textarea");
+      if (first) {
+        try {
+          first.scrollIntoView({ behavior: "smooth", block: "center" });
+          first.focus();
+        } catch {}
+      }
+
+      // Combustible (energie): '3' suele ser gasoil
+      this._setValue(document.querySelector("#energie"), vd.energie ?? "3");
+
+      // Marca de la carrocería
+      this._setValue(
+        document.querySelector("#marqueVariante"),
+        vd.carroceria_marca
+      );
+
+      // Equipamiento básico
+      this._setValue(document.querySelector("#Km"), vd.kilometros);
+      this._setValue(document.querySelector("#CV"), vd.potencia);
+      this._setValue(document.querySelector("#cylindree"), vd.cilindrada);
+      this._setValue(
+        document.querySelector("#tank_capacity"),
+        vd.capacidad_cuba
+      );
+      this._setValue(document.querySelector("#ref-park"), vd.codigo);
+
+      // Dimensiones
+      this._setValue(document.querySelector("#empat"), vd.distancia_ejes);
+      this._setValue(document.querySelector("#haut"), vd.altura);
+      this._setValue(document.querySelector("#larg"), vd.anchura);
+      this._setValue(document.querySelector("#long"), vd.longitud);
+      this._setValue(document.querySelector("#surface"), vd.superficie);
+
+      // Neumáticos
+      this._setValue(
+        document.querySelector("#rear_tyre_condition"),
+        vd.deterioro_ne_tra
+      );
+      this._setValue(
+        document.querySelector("#front_tyre_condition"),
+        vd.deterioro_ne_de
+      );
+      this._setValue(
+        document.querySelector("#front_tyre_size"),
+        vd.dimension_ne_de
+      );
+      this._setValue(
+        document.querySelector("#rear_tyre_size"),
+        vd.dimension_ne_tra
+      );
+      this._setValue(document.querySelector("#Rens_pneus"), vd.estado_di_ne);
+
+      // Suspensiones (checkboxes)
+      this._setCheckedById(
+        "susp_air",
+        vd.suspension_ne && vd.suspension_ne !== "0"
+      );
+      this._setCheckedById(
+        "susp_hydrau",
+        vd.suspension_hi && vd.suspension_hi !== "0"
+      );
+      this._setCheckedById(
+        "susp_meca",
+        vd.suspension_me && vd.suspension_me !== "0"
+      );
+
+      // Tonelaje / pesos
+      this._setValue(document.querySelector("#CU"), vd.carga_util);
+      this._setValue(document.querySelector("#pav"), vd.peso_vacio);
+      this._setValue(document.querySelector("#ptc"), vd.mma);
+      this._setValue(document.querySelector("#ptra"), vd.ptma);
+
+      // Caja de cambios (radio + precisión)
+      if (vd.caja_cambio !== undefined) {
+        this._setRadioSufijo("boite_vitesse_typ", vd.caja_cambio);
+      }
+      this._setValue(
+        document.querySelector("#boite_vitesse"),
+        vd.precision_cambio
+      );
+
+      // Precio y observaciones
+      this._setValue(document.querySelector("#prix"), vd.precio);
+      this._setValue(document.querySelector("#remarque"), vd.informacion_com);
+
+      // Norma Euro (0..6)
+      if (vd.normas !== undefined) {
+        this._setRadioSufijo("norme_euro", vd.normas);
+      }
+
+      // Literas (0/1)
+      if (vd.literas !== undefined) {
+        this._setRadioSufijo("couchette", vd.literas);
+      }
+
+      // Altura cabina (0..2)
+      if (vd.altura_cabina !== undefined) {
+        this._setRadioSufijo("hauteur_cab", vd.altura_cabina);
+      }
+
+      // Longitud cabina (0..3)
+      if (vd.longitud_cabina !== undefined) {
+        this._setRadioSufijo("long_cabine", vd.longitud_cabina);
+      }
+
+      // Tipo cabina (0..1)
+      if (vd.tipo_cabina !== undefined) {
+        this._setRadioSufijo("typ_cab", vd.tipo_cabina);
+      }
+
+      // Grúa autocargante
+      if (vd.grua_autocargante !== undefined) {
+        this._setCheckedById("grue", vd.grua_autocargante === "1");
+      }
+
+      // Fechas y ejes
+      this._setValue(
+        document.querySelector("#date"),
+        this._toDMY(vd.fecha_matriculacion)
+      );
+      this._setValue(document.querySelector("#essieux"), vd.ejes);
+      this._setValue(document.querySelector("#ess_semi"), vd.ejes_semiremolque);
+
+      // Pasajeros y horas
+      this._setValue(
+        document.querySelector("#nb_place_deb"),
+        vd.numero_pla_pie
+      );
+      this._setValue(
+        document.querySelector("#nb_place_ass"),
+        vd.numero_pla_sen
+      );
+      this._setValue(document.querySelector("#Heures"), vd.numero_ho);
+
+      // Tacógrafo (fechas + tipo)
+      this._setValue(
+        document.querySelector("#dat_contro"),
+        this._toDMY(vd.fecha_ul_vi_ta)
+      );
+      this._setValue(
+        document.querySelector("#dat_min"),
+        this._toDMY(vd.fecha_ul_in_te)
+      );
+      this._setValue(
+        document.querySelector("#dat_min_val"),
+        this._toDMY(vd.vencimiento_in_te)
+      );
+      this._setValue(document.querySelector("#typ_min"), vd.tipo_ins_te);
+
+      // Checkboxes de equipamiento
+      const cb = (prop, id) =>
+        this._setCheckedById(
+          id,
+          vd[prop] && vd[prop] !== "0" && vd[prop] !== ""
+        );
+      cb("abs", "abs");
+      cb("adr", "adr");
+      cb("bloque_diferencial", "bloc_diff");
+      cb("control_estabilida", "esp");
+      cb("deposito_suplementario", "reservoir");
+      cb("direccion_asistida", "dir_ass");
+      cb("enganche", "crochet");
+      cb("airbag", "airbag");
+      cb("alarma_marcha_atras", "Avertisseur_AR");
+      cb("asiento_con_suspension", "siege_susp");
+      cb("climatizacion", "Clim");
+      cb("cierre_centralizado", "ferm_central");
+      cb("ordenador_bordo", "ordi");
+      cb("enganche_remolque", "att_rem");
+      cb("regulador_velocidad", "regu_vitesse");
+      cb("webasto", "webas");
+      cb("retrovisores_electricos", "retro_elec");
+      cb("ebs", "ebs");
+      cb("gps", "gps");
+      cb("ganchos_carne", "meat_holder");
+      cb("eje_elevacion", "ess_relev");
+      cb("telma", "telma");
+      cb("asr", "asr");
+      cb("dfr", "dfr");
+      cb("retrovisores_electricos_ter", "retro_elec_chauf");
+      cb("maletero", "coffre");
+      cb("camara_vision_trasera", "cam_recul");
+      cb("frigorifico", "frigo");
+      cb("techo_practicable", "toit_ouv");
+
+      // Marca/Gama/Modelo (selects) + fallback libre
+      this._setValue(document.querySelector("#marque"), vd.eu_marca);
+      this._setValue(document.querySelector("#gamme"), vd.eu_gama);
+      this._setValue(document.querySelector("#modele"), vd.eu_modelo);
+      const modele = document.querySelector("#modele");
+      if (modele && ![...modele.options].some((o) => o.value == vd.eu_modelo)) {
+        this._setValue(
+          document.querySelector("#modele_free"),
+          vd.modelo || vd.eu_modelo
+        );
+        this._setValue(
+          document.querySelector("#modele_libre"),
+          vd.modelo || vd.eu_modelo
+        );
+      }
+
+      await this._wait(500);
+      return true;
+    }
+
     // Visibilidad simple (igual que en Autoline)
     _isVisible(el) {
       if (!el) return false;
@@ -1288,111 +1484,82 @@ async _seleccionarCategoria(){
     }
 
     // Paso 4: clicar TODAS las secciones "Validar"
-    async _clickValidar() {
-      // Botones tipo:
-      // <button type="button" data-bt="collapse64" data-target="#collapseGSix,#collapseGFour">Validar</button>
-      const getValidarButtons = () =>
-        Array.from(
-          document.querySelectorAll("button[data-bt][data-target], button")
-        ).filter(
-          (b) =>
-            /validar/i.test((b.textContent || b.value || "").trim()) &&
-            !b.disabled &&
-            this._isVisible(b)
-        );
+async _clickValidar(){
+  // 0) Si ya está el botón “Publicar” habilitado: ¡dale ya!
+  const readyNow = await this._waitForPublishEnabled(300);
+  if (readyNow){
+    this._forceClick(readyNow);
+    this._log("🚀 Publicado (detectado listo antes de validar).","info");
+    this._alreadyPublished = true;
+    return true;
+  }
 
-      let clicked = 0;
-      for (let i = 0; i < 6; i++) {
-        // máximo 6 rondas por seguridad
-        const btns = getValidarButtons();
-        if (!btns.length) break;
+  // 1) Clicar TODOS los “Validar” visibles (texto EXACTO/insensible a mayúsculas)
+  const getValidar = () => Array.from(document.querySelectorAll('button'))
+    .filter(b => this._isVisible(b) && this._isEnabled(b) && /^validar$/i.test((b.textContent||b.value||"").trim()));
 
-        // Clicamos todos los que haya visibles en esta ronda
-        for (const b of btns) {
-          try {
-            b.scrollIntoView({ behavior: "smooth", block: "center" });
-            b.click();
-            clicked++;
-            await this._wait(350); // deja que colapsen/valide
-          } catch (e) {}
-        }
-
-        // Pequeña pausa y recontar por si aparecen nuevos "Validar"
-        await this._wait(450);
-      }
-
-      if (clicked === 0) {
-        this._log(
-          "No encontré botones 'Validar' visibles (puede que ya esté todo validado).",
-          "info"
-        );
-      } else {
-        this._log(`✅ Validados ${clicked} bloque(s).`, "success");
-      }
-
-      // Dar un respiro a la página para refrescar estados
-      await this._wait(600);
-      return true;
+  let totalClicks = 0;
+  // hacemos varias rondas rápidas por si aparecen nuevos al validar
+  for (let ronda = 0; ronda < 5; ronda++){
+    const btns = getValidar();
+    if (!btns.length) break;
+    for (const b of btns){
+      this._forceClick(b);
+      totalClicks++;
+      await this._wait(120); // latiguillo mínimo para que el DOM reaccione
     }
+    await this._wait(180); // deja que aparezcan los siguientes “Validar”
+  }
+
+  if (totalClicks === 0){
+    this._log("ℹ️ No había botones 'Validar' (posible ya validado).","info");
+  } else {
+    this._log(`✅ Pulsados ${totalClicks} botón(es) 'Validar'.`,"success");
+  }
+
+  // 2) En cuanto el botón “Publicar mi anuncio” esté habilitado, clicarlo YA
+  const publish = await this._waitForPublishEnabled(5000);
+  if (publish){
+    this._forceClick(publish);
+    this._log("🚀 Click en 'Publicar mi anuncio' (tras validar).","info");
+    this._alreadyPublished = true;
+    // opcional: esperar un pelín por navegación
+    await this._wait(400);
+    return true;
+  }
+
+  // 3) Si aún no está habilitado, deja que el paso 5 remate
+  this._log("⏳ 'Publicar mi anuncio' no está listo aún; lo intento en el paso siguiente.","warning");
+  return true;
+}
+
+
 
     // Paso 5: Publicar mi anuncio
-    async _clickPublicar() {
-      // <button type="submit" id="submitDepot" name="submitDepot" value="1" class="button button-large green"><span>Publicar mi anuncio</span></button>
-      const selList = [
-        "#submitDepot",
-        'button[name="submitDepot"][type="submit"]',
-        'button.button.button-large.green[type="submit"]',
-        'button[type="submit"] span',
-      ];
+// async _clickPublicar(){
+//   if (this._alreadyPublished){
+//     this._log("⏭️ Publicar omitido (ya se pulsó antes).","info");
+//     return true;
+//   }
 
-      let btn = null;
-      for (const sel of selList) {
-        const el = document.querySelector(sel);
-        if (
-          el &&
-          (el.matches("button")
-            ? this._isVisible(el)
-            : this._isVisible(el.closest("button")))
-        ) {
-          btn = el.matches("button") ? el : el.closest("button");
-          break;
-        }
-      }
+//   // Espera corta a que el botón aparezca/habilite
+//   const btn = await this._waitForPublishEnabled(6000);
+//   if (!btn){
+//     this._log("❌ No localizo el botón 'Publicar mi anuncio' habilitado.","error");
+//     return false;
+//   }
 
-      if (!btn) {
-        // fallback: buscar por texto
-        const cands = Array.from(
-          document.querySelectorAll(
-            'button[type="submit"], button, input[type="submit"]'
-          )
-        );
-        btn = cands.find(
-          (b) =>
-            this._isVisible(b) &&
-            /publicar mi anuncio/i.test((b.textContent || b.value || "").trim())
-        );
-      }
+//   this._forceClick(btn);
+//   this._log("🚀 Click en 'Publicar mi anuncio' (paso final).","info");
 
-      if (!btn) {
-        this._log("❌ No encuentro el botón 'Publicar mi anuncio'", "error");
-        return false;
-      }
+//   // Si quieres, aquí puedes esperar una URL de éxito concreta:
+//   // await this._waitForUrl(/\/vehicle\/\d+\/(view|detail|success|confirmation)/i, 4000);
 
-      btn.scrollIntoView({ behavior: "smooth", block: "center" });
-      btn.click();
-      this._log("🚀 Click en 'Publicar mi anuncio'", "info");
+//   this._alreadyPublished = true;
+//   return true;
+// }
 
-      // Espera a cambio de pantalla o confirmación (ajústalo si conoces la URL de éxito)
-      const navigated = await Promise.race([
-        this._waitForUrl(
-          /\/vehicle\/\d+\/(view|detail|success|confirmation)/i,
-          6000
-        ),
-        this._wait(1500), // aunque no cambie la url, damos por válido el click
-      ]);
 
-      return true;
-    }
   }
 
   // =========================
