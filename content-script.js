@@ -1,13 +1,17 @@
-// Content Script unificado para Autoline.es
-// - Flujo de 5 pasos: publicar → cabezas → datos → siguiente → aplazar
-// - Persistencia de paso en chrome.storage.local
-// - Reanudación automática tras navegación (NavigationWatcher)
-// - Cola multi-vehículo: reset entre vehículos con queueInfo.justStarted
-// - Mensajería con popup: STATUS_UPDATE, PROGRESS_UPDATE, LOG_UPDATE, AUTOMATION_COMPLETE
+// Content Script unificado para Autoline.es + Europa-Camiones/Via-Mobilis
+// - Autoline mantiene su flujo original (5 pasos)
+// - Europa-Camiones tiene activados SOLO los 3 primeros pasos: publicar → categoría → datos
+// - Router por dominio al final
+// - Persistencia y mensajería compatibles con popup
 
 // =========================
 // Utilidades / helpers (globales)
 // =========================
+
+// Evita ejecutar en iframes (para que no haya doble instancia)
+if (window.top !== window.self) {
+  throw new Error("skip-iframe");
+}
 
 // Preparación del DOM (versión estable)
 function _preparaWebLegacy() {
@@ -109,10 +113,10 @@ function _txt(el) {
 }
 
 // =========================
-// Núcleo de la automatización
+// Núcleo AUTOLINE (se mantiene igual que tenías)
 // =========================
 (() => {
-  const STEPS = [
+  const STEPS_AUTOLINE = [
     { name: "publicar", desc: 'Click en "Publicar el anuncio"', waitNav: true },
     { name: "cabezas", desc: 'Click en "Cabezas tractoras"', waitNav: true },
     { name: "datos", desc: "Insertar datos del vehículo", waitNav: false },
@@ -181,25 +185,19 @@ function _txt(el) {
                 this.isQueueProcessing = !!message.isQueueProcessing;
                 this.queueInfo = message.queueInfo || null;
 
-                // 🔧 Reinicio completo y limpio si empieza un nuevo vehículo en la cola
                 if (this.isQueueProcessing && this.queueInfo?.justStarted) {
                   this._log(
                     "🔄 Nuevo vehículo en cola: reinicio completo del estado",
                     "info"
                   );
-
-                  // Reset completo del estado antes de iniciar
                   this.queueInfo.justStarted = false;
                   this.isRunning = false;
                   this.currentStep = 0;
                   this.vehicleData = this.vehicleData || null;
-
-                  // 🔁 Reset de banderas de sesión/fin para el nuevo vehículo
                   this._completedOnce = false;
                   this.sessionId = `${Date.now()}-${Math.random()
                     .toString(16)
                     .slice(2)}`;
-
                   await chrome.storage.local.remove([
                     "auto_running",
                     "auto_step",
@@ -208,7 +206,6 @@ function _txt(el) {
                   await this._delay(300);
                 }
 
-                // 🚀 Iniciar la automatización normalmente
                 await this._start();
                 sendResponse?.({ success: true });
                 break;
@@ -222,7 +219,6 @@ function _txt(el) {
                 await this._reset();
                 sendResponse?.({ success: true });
                 break;
-
               default:
                 break;
             }
@@ -230,9 +226,7 @@ function _txt(el) {
             sendResponse?.({ success: false, error: e?.message });
           }
         })();
-
-        // Permite respuestas asíncronas
-        return true;
+        return true; // async
       });
     }
 
@@ -286,7 +280,6 @@ function _txt(el) {
             "info"
           );
 
-          // Si caemos en search_text, corregir
           if (this.isRunning && _isWrongSearchUrl()) {
             this._log("↩️ Corrigiendo desvío de búsqueda…", "warning");
             history.length > 1 ? history.back() : location.reload();
@@ -305,7 +298,7 @@ function _txt(el) {
         throw new Error("Not on autoline.es");
       }
       this.isRunning = true;
-      if (this.currentStep < 0 || this.currentStep >= STEPS.length)
+      if (this.currentStep < 0 || this.currentStep >= STEPS_AUTOLINE.length)
         this.currentStep = 0;
       await this._saveState();
 
@@ -334,14 +327,14 @@ function _txt(el) {
 
     async _executeStep() {
       if (!this.isRunning) return;
-      if (this.currentStep >= STEPS.length) return this._complete();
+      if (this.currentStep >= STEPS_AUTOLINE.length) return this._complete();
 
-      const step = STEPS[this.currentStep];
+      const step = STEPS_AUTOLINE[this.currentStep];
       this._status(
-        `Paso ${this.currentStep + 1}/${STEPS.length}: ${step.desc}`,
+        `Paso ${this.currentStep + 1}/${STEPS_AUTOLINE.length}: ${step.desc}`,
         "running"
       );
-      this._progress(this.currentStep, STEPS.length);
+      this._progress(this.currentStep, STEPS_AUTOLINE.length);
       this._log(`📍 Paso ${this.currentStep + 1}: ${step.desc}`, "info");
 
       try {
@@ -370,13 +363,7 @@ function _txt(el) {
           this._log(`✅ ${step.desc}`, "success");
           this.currentStep++;
           await this._saveState();
-
-          if (step.waitNav) {
-            this._log("⏳ Esperando navegación…", "info");
-            setTimeout(() => this._executeStep(), 3000);
-          } else {
-            setTimeout(() => this._executeStep(), 600);
-          }
+          setTimeout(() => this._executeStep(), step.waitNav ? 3000 : 600);
         } else {
           this._log(`❌ Error en: ${step.desc}`, "error");
           await this._stop();
@@ -402,7 +389,6 @@ function _txt(el) {
         `${Date.now()}-${Math.random().toString(16).slice(2)}`;
       this._send("AUTOMATION_COMPLETE", { sessionId });
 
-      // 🧹 Reset completo para siguiente vehículo
       await chrome.storage.local.remove([
         "auto_running",
         "auto_step",
@@ -416,7 +402,7 @@ function _txt(el) {
       } catch {}
     }
 
-    // ---------- Acciones por paso ----------
+    // ---------- Acciones (Autoline) ----------
     async _clickPublicar() {
       const sel = 'span.button.js-hrf[data-analytics-goal="button_place_ad"]';
       const el = await this._waitVisible(sel, this.maxRetries);
@@ -424,7 +410,6 @@ function _txt(el) {
       this._smoothClick(el);
       return true;
     }
-
     async _clickCabezas() {
       const tries = [
         'div.option[data-cat-id="42"]',
@@ -439,7 +424,6 @@ function _txt(el) {
           return true;
         }
       }
-      // Fallback por texto
       const elTxt = await this._findByText("Cabezas tractoras");
       if (elTxt) {
         this._smoothClick(elTxt);
@@ -447,21 +431,15 @@ function _txt(el) {
       }
       return false;
     }
-
     async _insertarDatos() {
       if (!this.vehicleData) {
         this._log("⚠️ No hay datos del vehículo; abortando", "error");
         return false;
       }
-
-      // Preparación "legacy" (quita select2, muestra secciones)
       _preparaWebLegacy();
 
-      // Asegurar que estamos en el formulario
       const okForm = await this._esperarFormulario();
       if (!okForm) return false;
-
-      // Extra por si quedaron restos
       this._prepararFormulario();
 
       const v = this.vehicleData;
@@ -590,15 +568,13 @@ function _txt(el) {
 
       this._log("📊 Datos insertados", "success");
 
-      // Blindaje anti-desvío
       await this._delay(600);
       if (_isWrongSearchUrl()) {
         this._log("⚠️ Desvío a búsqueda detectado. Volviendo atrás…", "error");
         history.length > 1 ? history.back() : location.reload();
-        return false; // El watcher reanudará
+        return false;
       }
 
-      // Verificación de no navegación inesperada
       const before = location.href;
       await this._delay(800);
       if (location.href !== before) {
@@ -607,9 +583,7 @@ function _txt(el) {
       }
       return true;
     }
-
     async _clickSiguiente() {
-      // 1) Selector específico del botón real
       const specific = document.querySelector(
         ".next-button button, .next-button > button"
       );
@@ -621,8 +595,6 @@ function _txt(el) {
         this._smoothClick(specific);
         return true;
       }
-
-      // 2) Variante: el contenedor está pero con más capas
       const wrapper = document.querySelector(".next-button");
       if (wrapper) {
         const btnInWrapper = wrapper.querySelector(
@@ -637,8 +609,6 @@ function _txt(el) {
           return true;
         }
       }
-
-      // 3) Fallback: buscar por texto visible “Siguiente / Continuar” en toda la página
       const candidates = Array.from(
         document.querySelectorAll(
           'button, [role="button"], input[type="button"], input[type="submit"]'
@@ -652,26 +622,19 @@ function _txt(el) {
         return true;
       }
 
-      // 4) Último intento: click en el contenedor si tiene listener delegado
       if (wrapper && this._isVisible(wrapper)) {
         this._smoothClick(wrapper);
         return true;
       }
-
-      // no encontrado
       this._log('❌ No se encontró el botón "Siguiente"', "error");
       return false;
     }
-
     async _clickAplazar() {
-      // 1) Selector específico del enlace con clase suspend
       const suspendLink = document.querySelector(".actions a.suspend");
       if (suspendLink && this._isVisible(suspendLink)) {
         this._smoothClick(suspendLink);
         return true;
       }
-
-      // 2) Fallback: buscar cualquier enlace/botón que contenga "Aplazar"
       const candidates = Array.from(
         document.querySelectorAll("a, button, input[type=submit]")
       );
@@ -686,8 +649,6 @@ function _txt(el) {
         this._smoothClick(byText);
         return true;
       }
-
-      // 3) Si no existe “Aplazar”, no romper el flujo: finalizar igual
       this._log(
         "ℹ️ No se encontró enlace/botón “Aplazar”, finalizando sin aplazar.",
         "warning"
@@ -709,7 +670,6 @@ function _txt(el) {
         el.dispatchEvent(ev);
       }
     }
-
     async _waitVisible(selector, retries = 3) {
       for (let i = 0; i < retries; i++) {
         const el = document.querySelector(selector);
@@ -718,7 +678,6 @@ function _txt(el) {
       }
       return null;
     }
-
     _isVisible(el) {
       if (!el) return false;
       const r = el.getBoundingClientRect();
@@ -731,7 +690,6 @@ function _txt(el) {
         st.opacity !== "0"
       );
     }
-
     async _findByText(txt) {
       const nodes = document.querySelectorAll("*");
       for (const el of nodes) {
@@ -742,7 +700,6 @@ function _txt(el) {
       }
       return null;
     }
-
     async _esperarFormulario() {
       for (let i = 1; i <= 10; i++) {
         const form = document.querySelector("form");
@@ -759,9 +716,7 @@ function _txt(el) {
       }
       return false;
     }
-
     _prepararFormulario() {
-      // por si quedó algo de select2
       document
         .querySelectorAll(".select2-hidden-accessible")
         ?.forEach((el) => el.classList.remove("select2-hidden-accessible"));
@@ -775,8 +730,6 @@ function _txt(el) {
         ?.forEach((sec) => (sec.style.display = "block"));
       this._log("🔧 Formulario preparado", "info");
     }
-
-    // setters robustos
     async _inp(sel, val) {
       if (!val && val !== 0) return;
       const el = document.querySelector(sel);
@@ -810,7 +763,6 @@ function _txt(el) {
       el.dispatchEvent(new Event("change", { bubbles: true }));
       await this._delay(30);
     }
-
     _getY(any) {
       if (!any) return null;
       if (/^\d{4}$/.test(String(any))) return String(any);
@@ -822,16 +774,651 @@ function _txt(el) {
       const d = new Date(any);
       return isNaN(d) ? null : String(d.getMonth() + 1).padStart(2, "0");
     }
-
     _delay(ms) {
       return new Promise((r) => setTimeout(r, ms));
     }
   }
 
-  // Inicialización única
-  if (location.host.includes("autoline.es")) {
-    if (!window.__autolineAutomation__) {
-      window.__autolineAutomation__ = new AutolineAutomation();
+  // =========================
+  // Base (opcional) y Europa-Camiones/Via-Mobilis (3 pasos)
+  // =========================
+
+  class BaseAutomation {}
+
+  class EuropacamionesAutomation extends BaseAutomation {
+    constructor() {
+      super();
+      this.currentStep = 0;
+      this.isRunning = false;
+      this.vehicleData = null;
+      this.isQueueProcessing = false;
+      this.queueInfo = null;
+      this.maxRetries = 3;
+      this.retryDelay = 800;
+      this._watcher = null;
+      this._lastUrl = location.href;
+      this._completedOnce = false;
+      this.sessionId = null;
+
+      this._setupMsgListener();
+      this._startNavigationWatcher();
+      this._loadStateAndMaybeResume();
+
+      this._keydownBlocker = (e) => {
+        if (!this.isRunning) return;
+        if (e.key === "Enter") {
+          e.preventDefault();
+          e.stopPropagation();
+        }
+      };
+      window.addEventListener("keydown", this._keydownBlocker, true);
+    }
+
+    // ---- Mensajería (idéntica a Autoline, con claves eco_*) ----
+    _setupMsgListener() {
+      chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+        (async () => {
+          try {
+            switch (message.type) {
+              case "PING":
+                sendResponse({
+                  success: true,
+                  message: "content-script alive",
+                  status: {
+                    isRunning: this.isRunning,
+                    currentStep: this.currentStep,
+                    url: window.location.href,
+                  },
+                });
+                break;
+
+              case "START_AUTOMATION":
+                this.vehicleData = message.vehicleData || this.vehicleData;
+                this.isQueueProcessing = !!message.isQueueProcessing;
+                this.queueInfo = message.queueInfo || null;
+
+                if (this.isQueueProcessing && this.queueInfo?.justStarted) {
+                  this.queueInfo.justStarted = false;
+                  this.isRunning = false;
+                  this.currentStep = 0;
+                  this._completedOnce = false;
+                  this.sessionId = `${Date.now()}-${Math.random()
+                    .toString(16)
+                    .slice(2)}`;
+                  await chrome.storage.local.remove([
+                    "eco_running",
+                    "eco_step",
+                    "eco_data",
+                  ]);
+                  await this._delay(300);
+                }
+
+                await this._start();
+                sendResponse?.({ success: true });
+                break;
+
+              case "STOP_AUTOMATION":
+                await this._stop();
+                sendResponse?.({ success: true });
+                break;
+
+              case "RESET_AUTOMATION":
+                await this._reset();
+                sendResponse?.({ success: true });
+                break;
+
+              default:
+                break;
+            }
+          } catch (e) {
+            sendResponse?.({ success: false, error: e?.message });
+          }
+        })();
+        return true; // async
+      });
+    }
+
+    _send(type, data) {
+      try {
+        chrome.runtime.sendMessage({ type, data });
+      } catch {}
+    }
+    _status(text, type = "running") {
+      this._send("STATUS_UPDATE", { text, type });
+    }
+    _progress(cur, total) {
+      this._send("PROGRESS_UPDATE", { current: cur, total });
+    }
+    _log(message, type = "info") {
+      this._send("LOG_UPDATE", { message, type });
+    }
+    async _saveState() {
+      await chrome.storage.local.set({
+        eco_running: this.isRunning,
+        eco_step: this.currentStep,
+        eco_data: this.vehicleData,
+      });
+    }
+    async _loadStateAndMaybeResume() {
+      const st = await chrome.storage.local.get([
+        "eco_running",
+        "eco_step",
+        "eco_data",
+      ]);
+      if (st.eco_running && typeof st.eco_step === "number") {
+        this.isRunning = true;
+        this.currentStep = st.eco_step;
+        this.vehicleData = st.eco_data || this.vehicleData;
+        this._log("🔄 Reanudando automatización tras navegación…", "info");
+        setTimeout(() => this._executeStep(), 1200);
+      }
+    }
+    _startNavigationWatcher() {
+      if (this._watcher) return;
+      this._watcher = setInterval(async () => {
+        if (location.href !== this._lastUrl) {
+          const old = this._lastUrl;
+          this._lastUrl = location.href;
+          this._log(`📍 Navegación: ${old} → ${this._lastUrl}`, "info");
+          if (this.isRunning) await this._loadStateAndMaybeResume();
+        }
+      }, 1500);
+    }
+    _delay(ms) {
+      return new Promise((r) => setTimeout(r, ms));
+    }
+
+    // ---- Helpers DOM ----
+    _wait(ms) {
+      return new Promise((r) => setTimeout(r, ms));
+    }
+    async _waitFor(sel, timeout = 10000) {
+      const t0 = Date.now();
+      while (Date.now() - t0 < timeout) {
+        const el = document.querySelector(sel);
+        if (el) return el;
+        await this._wait(200);
+      }
+      return null;
+    }
+    _setValue(el, v) {
+      if (!el) return false;
+      const val = (v ?? "").toString().trim();
+      el.value = val;
+      el.dispatchEvent(new Event("input", { bubbles: true }));
+      el.dispatchEvent(new Event("change", { bubbles: true }));
+      return true;
+    }
+    _click(el) {
+      if (!el) return false;
+      el.click();
+      return true;
+    }
+    _toDMY(s) {
+      if (!s || s === "0000-00-00") return "";
+      const d = new Date(s);
+      if (isNaN(d)) return "";
+      const pad = (n) => (n < 10 ? "0" + n : n);
+      return `${pad(d.getDate())}/${pad(d.getMonth() + 1)}/${d.getFullYear()}`;
+    }
+    _setCheckedById(id, on) {
+      const el = document.getElementById(id);
+      if (!el) return false;
+      el.checked = !!on;
+      el.dispatchEvent(new Event("input", { bubbles: true }));
+      el.dispatchEvent(new Event("change", { bubbles: true }));
+      return true;
+    }
+    _setRadioSufijo(baseId, code) {
+      if (code == null || code === "") return false;
+      const el = document.getElementById(`${baseId}-${code}`);
+      if (!el) return false;
+      el.checked = true;
+      el.dispatchEvent(new Event("change", { bubbles: true }));
+      return true;
+    }
+    // Espera a que la URL cumpla un patrón
+    async _waitForUrl(regex, timeout = 8000) {
+      const t0 = Date.now();
+      while (Date.now() - t0 < timeout) {
+        if (regex.test(location.pathname)) return true;
+        await this._wait(200);
+      }
+      return false;
+    }
+
+    // Devuelve un elemento <form> con "suficientes" campos (no un form vacío)
+    _hasUsableForm() {
+      const form = document.querySelector("form");
+      if (!form) return false;
+      const fields = form.querySelectorAll("input, select, textarea");
+      return fields.length >= 10; // umbral razonable para la página de anuncio
+    }
+
+    // Espera un formulario "usable" y te devuelve el form (o null)
+    async _waitForForm(timeout = 10000) {
+      const t0 = Date.now();
+      while (Date.now() - t0 < timeout) {
+        const ok = this._hasUsableForm();
+        if (ok) return document.querySelector("form");
+        await this._wait(200);
+      }
+      return null;
+    }
+
+    // ---- Ciclo principal (3 pasos) ----
+    async _start() {
+      // europa-camiones.com y subdominios via-mobilis (p. ej., my.via-mobilis.com)
+      const okHost =
+        /europa-camiones\./i.test(location.host) ||
+        /(^|\.)via-mobilis\.com$/i.test(location.host);
+      if (!okHost) {
+        this._status(
+          "Debes estar en europa-camiones.com o my.via-mobilis.com",
+          "error"
+        );
+        this._log("❌ Dominio no compatible para esta automatización", "error");
+        throw new Error("Not on europa-camiones/via-mobilis");
+      }
+
+      this.isRunning = true;
+      if (this.currentStep < 0) this.currentStep = 0;
+      await this._saveState();
+
+      this._status("Iniciando automatización (Europa-Camiones)…", "running");
+      this._log("🚀 Automatización iniciada (Europa-Camiones)", "info");
+      this._executeStep();
+    }
+
+    async _stop() {
+      this.isRunning = false;
+      await chrome.storage.local.set({ eco_running: false });
+      this._log("⏹️ Automatización detenida", "warning");
+    }
+    async _reset() {
+      this.isRunning = false;
+      this.currentStep = 0;
+      this.vehicleData = null;
+      await chrome.storage.local.remove([
+        "eco_running",
+        "eco_step",
+        "eco_data",
+      ]);
+      this._log("🔄 Reiniciada (Europa-Camiones)", "info");
+    }
+
+    async _executeStep() {
+      if (!this.isRunning) return;
+
+      // SOLO 5 PASOS: publicar → categoría → datos → validar → publicar final
+      const STEPS = [
+        { name: "nueva", desc: "Abrir “Publicar un anuncio”", waitNav: true },
+        {
+          name: "categoria",
+          desc: "Elegir “Cabeza tractora → Estándar”",
+          waitNav: true,
+        },
+        { name: "datos", desc: "Rellenar formulario", waitNav: false },
+        {
+          name: "validar",
+          desc: "Validar todas las secciones",
+          waitNav: false,
+        },
+        { name: "publicar", desc: "Publicar mi anuncio", waitNav: true },
+      ];
+
+      if (this.currentStep >= STEPS.length) return this._complete();
+
+      const step = STEPS[this.currentStep];
+      this._status(
+        `Paso ${this.currentStep + 1}/${STEPS.length}: ${step.desc}`,
+        "running"
+      );
+      this._progress(this.currentStep, STEPS.length);
+      this._log(`📍 Paso ${this.currentStep + 1}: ${step.desc}`, "info");
+
+      let ok = false;
+      try {
+        switch (step.name) {
+          case "nueva":
+            ok = await this._clickNuevaPublicacion();
+            break;
+          case "categoria":
+            ok = await this._seleccionarCategoria();
+            break;
+          case "datos":
+            ok = await this._insertarDatos();
+            break;
+          case "validar":
+            ok = await this._clickValidar();
+            break;
+          case "publicar":
+            ok = await this._clickPublicar();
+            break;
+        }
+      } catch (e) {
+        this._log(`❌ Excepción en paso: ${e?.message || e}`, "error");
+        return this._stop();
+      }
+
+      if (!this.isRunning) return;
+      if (ok) {
+        this._log(`✅ ${step.desc}`, "success");
+        this.currentStep++;
+        await this._saveState();
+        setTimeout(() => this._executeStep(), step.waitNav ? 3000 : 600);
+      } else {
+        this._log(`❌ Error en: ${step.desc}`, "error");
+        await this._stop();
+      }
+    }
+
+    async _complete() {
+      if (this._completedOnce) return;
+      this._completedOnce = true;
+      this.isRunning = false;
+      await chrome.storage.local.set({ eco_running: false, eco_step: 0 });
+      this._status("✅ Datos introducidos (Europa-Camiones)", "success");
+      this._progress(3, 3);
+      const sessionId =
+        this.sessionId ||
+        `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+      this._send("AUTOMATION_COMPLETE", { sessionId });
+      await chrome.storage.local.remove([
+        "eco_running",
+        "eco_step",
+        "eco_data",
+      ]);
+      this.currentStep = 0;
+      this.vehicleData = null;
+      this._log("🔁 Listo para siguiente vehículo (Europa-Camiones)", "info");
+    }
+
+    // ====== PASO 1: Publicar ======
+    async _clickNuevaPublicacion() {
+      // Botón: <a class="btn-flex btn-depot ..." href="/vehicle/new" title="Publicar un anuncio">
+      const sel = 'a[href="/vehicle/new"][title*="Publicar"]';
+      const a = await this._waitFor(sel, 10000);
+      if (!a) {
+        this._log("No encuentro 'Publicar un anuncio'", "error");
+        return false;
+      }
+      this._log("Click en 'Publicar un anuncio'", "info");
+      this._click(a);
+
+      // Espera a EITHER: parrilla de categorías o directamente un form
+      const moved = await Promise.race([
+        this._waitFor('a[href*="/vehicle/new?"][href*="cat="]', 12000), // links de categorías
+        this._waitFor(
+          '#energie, #Km, #prix, form[action*="vehicle"], form input#Km',
+          12000
+        ), // formulario directo
+      ]);
+
+      return !!moved;
+    }
+
+    // ====== PASO 2: Categoría Estándar (Cabeza tractora) ======
+    async _seleccionarCategoria() {
+      // En la parrilla (home): enlace "Estándar"
+      const sel =
+        'a.background-color-1-with-transparency-light-hover[href*="/vehicle/new?"][href*="cat=31"][href*="var=68"]';
+      const link = await this._waitFor(sel, 15000);
+
+      if (link) {
+        this._log("Click en categoría: Estándar (Cabeza tractora)", "info");
+        this._click(link);
+        await this._wait(300);
+
+        // Si no navegó (SPA), forzamos su href absoluto
+        const href = link.getAttribute("href");
+        const absolute = href?.startsWith("http")
+          ? href
+          : new URL(href, location.origin).href;
+
+        // Ver si ya estamos en /vehicle/new o /vehicle/{id}/edit
+        const urlOkSoon = await this._waitForUrl(
+          /\/vehicle\/(new|[^/]+\/edit)/i,
+          2500
+        );
+        if (!urlOkSoon) {
+          this._log(
+            "No hubo navegación tras el click, forzando location.assign()…",
+            "warning"
+          );
+          location.assign(absolute);
+        }
+      } else {
+        // Puede que ya vengas directo al formulario (como en tu captura /vehicle/{id}/edit?...).
+        this._log(
+          "No veo el link de 'Estándar'; verifico si ya estoy en el formulario…",
+          "info"
+        );
+      }
+
+      // Espera robusta a FORMULARIO o LOGIN
+      const winner = await Promise.race([
+        this._waitForForm(12000), // cualquier form con campos reales
+        this._waitFor('input[name="email"], input[type="email"]', 12000), // login
+      ]);
+
+      // ¿Login?
+      if (
+        winner &&
+        winner.matches &&
+        (winner.matches('input[name="email"]') ||
+          winner.matches('input[type="email"]'))
+      ) {
+        this._status("Necesitas iniciar sesión en my.via-mobilis.com", "error");
+        this._log("🛑 Redirigido a login. Inicia sesión y relanza.", "error");
+        return false;
+      }
+
+      // Confirmar por URL + #de campos
+      const urlOk = /\/vehicle\/(new|[^/]+\/edit)/i.test(location.pathname);
+      const formOk = this._hasUsableForm();
+      if (!urlOk || !formOk) {
+        this._log(
+          `No detecto formulario aún. urlOk=${urlOk} formOk=${formOk}`,
+          "error"
+        );
+        return false;
+      }
+
+      return true;
+    }
+
+    // ====== PASO 3: Insertar datos ======
+// Paso 2 ultrarrápido: ir a "Estándar" sin pensarlo
+async _seleccionarCategoria(){
+  // 0) Si ya estamos en el formulario, salta YA
+  if (/\/vehicle\/(new|[^/]+\/edit)/i.test(location.pathname) && this._hasUsableForm()){
+    this._log("Ya estoy en el formulario, salto Paso 2.", "info");
+    return true;
+  }
+
+  // 1) Busca el enlace "Estándar" (cat=31,var=68)
+  const sel = 'a.background-color-1-with-transparency-light-hover[href*="/vehicle/new?"][href*="cat=31"][href*="var=68"]';
+  let link = document.querySelector(sel);
+
+  // Fallback por texto si cambia la clase
+  if (!link) {
+    link = Array.from(document.querySelectorAll('a[href*="/vehicle/new?"][href*="cat=31"][href*="var=68"]'))
+      .find(a => /estándar/i.test((a.textContent||"").trim()));
+  }
+  if (!link){
+    this._log("No encuentro el enlace de 'Estándar' (cat=31,var=68).", "error");
+    return false;
+  }
+
+  // 2) Navega directo (sin esperar a que el click lo haga por SPA)
+  const href = link.getAttribute("href");
+  const absolute = href?.startsWith("http") ? href : new URL(href, location.origin).href;
+  this._log("→ Navegando a Estándar…", "info");
+  location.assign(absolute);
+
+  // 3) Espera corta a la URL del form y al form “usable”
+  const urlOk = await this._waitForUrl(/\/vehicle\/(new|[^/]+\/edit)/i, 4000);
+  if (!urlOk){
+    this._log("No cambió la URL a formulario tras 4s.", "error");
+    return false;
+  }
+  const formOk = await this._waitForForm(6000); // ~6s máximo
+  if (!formOk){
+    this._log("No veo un formulario con campos tras 6s.", "error");
+    return false;
+  }
+
+  return true;
+}
+
+
+    // Visibilidad simple (igual que en Autoline)
+    _isVisible(el) {
+      if (!el) return false;
+      const r = el.getBoundingClientRect();
+      const st = getComputedStyle(el);
+      return (
+        r.width > 0 &&
+        r.height > 0 &&
+        st.visibility !== "hidden" &&
+        st.display !== "none" &&
+        st.opacity !== "0"
+      );
+    }
+
+    // Paso 4: clicar TODAS las secciones "Validar"
+    async _clickValidar() {
+      // Botones tipo:
+      // <button type="button" data-bt="collapse64" data-target="#collapseGSix,#collapseGFour">Validar</button>
+      const getValidarButtons = () =>
+        Array.from(
+          document.querySelectorAll("button[data-bt][data-target], button")
+        ).filter(
+          (b) =>
+            /validar/i.test((b.textContent || b.value || "").trim()) &&
+            !b.disabled &&
+            this._isVisible(b)
+        );
+
+      let clicked = 0;
+      for (let i = 0; i < 6; i++) {
+        // máximo 6 rondas por seguridad
+        const btns = getValidarButtons();
+        if (!btns.length) break;
+
+        // Clicamos todos los que haya visibles en esta ronda
+        for (const b of btns) {
+          try {
+            b.scrollIntoView({ behavior: "smooth", block: "center" });
+            b.click();
+            clicked++;
+            await this._wait(350); // deja que colapsen/valide
+          } catch (e) {}
+        }
+
+        // Pequeña pausa y recontar por si aparecen nuevos "Validar"
+        await this._wait(450);
+      }
+
+      if (clicked === 0) {
+        this._log(
+          "No encontré botones 'Validar' visibles (puede que ya esté todo validado).",
+          "info"
+        );
+      } else {
+        this._log(`✅ Validados ${clicked} bloque(s).`, "success");
+      }
+
+      // Dar un respiro a la página para refrescar estados
+      await this._wait(600);
+      return true;
+    }
+
+    // Paso 5: Publicar mi anuncio
+    async _clickPublicar() {
+      // <button type="submit" id="submitDepot" name="submitDepot" value="1" class="button button-large green"><span>Publicar mi anuncio</span></button>
+      const selList = [
+        "#submitDepot",
+        'button[name="submitDepot"][type="submit"]',
+        'button.button.button-large.green[type="submit"]',
+        'button[type="submit"] span',
+      ];
+
+      let btn = null;
+      for (const sel of selList) {
+        const el = document.querySelector(sel);
+        if (
+          el &&
+          (el.matches("button")
+            ? this._isVisible(el)
+            : this._isVisible(el.closest("button")))
+        ) {
+          btn = el.matches("button") ? el : el.closest("button");
+          break;
+        }
+      }
+
+      if (!btn) {
+        // fallback: buscar por texto
+        const cands = Array.from(
+          document.querySelectorAll(
+            'button[type="submit"], button, input[type="submit"]'
+          )
+        );
+        btn = cands.find(
+          (b) =>
+            this._isVisible(b) &&
+            /publicar mi anuncio/i.test((b.textContent || b.value || "").trim())
+        );
+      }
+
+      if (!btn) {
+        this._log("❌ No encuentro el botón 'Publicar mi anuncio'", "error");
+        return false;
+      }
+
+      btn.scrollIntoView({ behavior: "smooth", block: "center" });
+      btn.click();
+      this._log("🚀 Click en 'Publicar mi anuncio'", "info");
+
+      // Espera a cambio de pantalla o confirmación (ajústalo si conoces la URL de éxito)
+      const navigated = await Promise.race([
+        this._waitForUrl(
+          /\/vehicle\/\d+\/(view|detail|success|confirmation)/i,
+          6000
+        ),
+        this._wait(1500), // aunque no cambie la url, damos por válido el click
+      ]);
+
+      return true;
     }
   }
-})();
+
+  // =========================
+  // Router multi-sitio (Autoline / Europa-Camiones / Via-Mobilis)
+  // =========================
+  (() => {
+    const host = location.host;
+
+    const SITE_MAP = [
+      {
+        test: (h) => /autoline\.es$/i.test(h),
+        key: "autoline",
+        init: () => new AutolineAutomation(),
+      },
+      {
+        test: (h) =>
+          /europa-camiones\.com$/i.test(h) ||
+          /(^|\.)via-mobilis\.com$/i.test(h),
+        key: "europacamiones",
+        init: () => new EuropacamionesAutomation(),
+      },
+    ];
+
+    if (!window.__siteAutomation__) {
+      const site = SITE_MAP.find((s) => s.test(host));
+      if (site) window.__siteAutomation__ = site.init();
+    }
+  })();
+})(); // cierre IIFE raíz

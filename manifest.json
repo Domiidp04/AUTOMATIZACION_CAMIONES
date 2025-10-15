@@ -1,35 +1,35 @@
 {
   "manifest_version": 3,
-  "name": "Truck Manager Autoline",
-  "description": "Automatización para Autoline.es",
-  "version": "1.0",
+  "name": "Truck Manager (Autoline + Europa-Camiones + Via-Mobilis)",
+  "description": "Automatización para Autoline.es, europa-camiones.com y my.via-mobilis.com.",
+  "version": "1.3",
 
-  "action": {
-    "default_popup": "popup.html"
-  },
+  "action": { "default_popup": "popup.html" },
 
-"permissions": [
-  "activeTab",
-  "scripting",
-  "tabs",
-  "storage"
-],
+  "permissions": ["activeTab", "scripting", "tabs", "storage"],
 
   "host_permissions": [
     "*://*.autoline.es/*",
     "*://autoline.es/*",
-    "https://truckocasion.com/*",
-      "*://autoline.es/*"
-
+    "*://*.europa-camiones.com/*",
+    "*://europa-camiones.com/*",
+    "*://*.via-mobilis.com/*",
+    "*://via-mobilis.com/*",
+    "https://truckocasion.com/*"
   ],
 
-  "background": {
-    "service_worker": "background.js"
-  },
+  "background": { "service_worker": "background.js" },
 
   "content_scripts": [
     {
-      "matches": ["*://*.autoline.es/*","*://autoline.es/*"],
+      "matches": [
+        "*://*.autoline.es/*",
+        "*://autoline.es/*",
+        "*://*.europa-camiones.com/*",
+        "*://europa-camiones.com/*",
+        "*://*.via-mobilis.com/*",
+        "*://via-mobilis.com/*"
+      ],
       "js": ["content-script.js"],
       "run_at": "document_end"
     }
