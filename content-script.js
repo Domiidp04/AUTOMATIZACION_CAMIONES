@@ -1068,6 +1068,84 @@ async _waitForPublishEnabled(timeout=6000){
       this._executeStep();
     }
 
+    // Asegura que un <select> tenga la opción y la selecciona (dispara eventos)
+_ensureOptionAndSelect(selectEl, value, label){
+  if (!selectEl) return false;
+  const v = (value ?? "").toString().trim();
+  const txt = (label ?? v).toString().trim();
+  if (!v && !txt) return false;
+
+  const exists = Array.from(selectEl.options).some(o => String(o.value) === v || (o.textContent||"").trim() === txt);
+  if (!exists) {
+    const opt = document.createElement("option");
+    opt.value = v || txt;
+    opt.textContent = txt || v;
+    selectEl.appendChild(opt);
+  }
+  selectEl.value = v || txt;
+  selectEl.dispatchEvent(new Event("input", {bubbles:true}));
+  selectEl.dispatchEvent(new Event("change", {bubbles:true}));
+  return true;
+}
+
+// Activa modo "modelo libre" si el select de modelo no sirve
+_enableModeloLibre(modeloStr){
+  const mFree  = document.querySelector("#modele_free");
+  const mLibre = document.querySelector("#modele_libre");
+  const mSel   = document.querySelector("#modele");
+
+  if (mSel)  mSel.classList.add("hidden");
+  if (mFree) mFree.classList.remove("hidden");
+  if (mLibre) mLibre.classList.remove("hidden");
+
+  if (mFree){
+    mFree.value = modeloStr || "";
+    mFree.dispatchEvent(new Event("input",{bubbles:true}));
+    mFree.dispatchEvent(new Event("change",{bubbles:true}));
+  }
+  if (mLibre){
+    mLibre.value = modeloStr || "";
+    mLibre.dispatchEvent(new Event("input",{bubbles:true}));
+    mLibre.dispatchEvent(new Event("change",{bubbles:true}));
+  }
+}
+
+// Marca/Gama/Modelo con fallback (replica tu AddCombo de europa.js)
+_setMarcaGamaModelo(vd){
+  const marque = document.querySelector("#marque");
+  const gamme  = document.querySelector("#gamme");
+  const modele = document.querySelector("#modele");
+
+  const marca  = vd.eu_marca ?? vd.marca ?? "";
+  const gama   = vd.eu_gama  ?? vd.gama  ?? "";
+  const modelo = vd.eu_modelo ?? vd.modelo ?? "";
+
+  // 1) Marca
+  if (marca) this._ensureOptionAndSelect(marque, marca, marca);
+
+  // 2) Gama (si no existe la opción, la creo y selecciono)
+  if (gama) this._ensureOptionAndSelect(gamme, gama, gama);
+
+  // 3) Modelo: intento por select; si no está, activo "libre"
+  let modeloSetPorSelect = false;
+  if (modelo && modele){
+    const has = Array.from(modele.options).some(o =>
+      String(o.value) === String(modelo) ||
+      (o.textContent||"").trim() === String(modelo)
+    );
+    if (has){
+      this._ensureOptionAndSelect(modele, modelo, modelo);
+      modeloSetPorSelect = true;
+    }
+  }
+
+  if (!modeloSetPorSelect){
+    // Modo libre (como en tu AddCombo: esconder select y usar *_free/_libre)
+    this._enableModeloLibre(modelo);
+  }
+}
+
+
     async _stop() {
       this.isRunning = false;
       await chrome.storage.local.set({ eco_running: false });
@@ -1449,21 +1527,9 @@ async _seleccionarCategoria(){
       cb("frigorifico", "frigo");
       cb("techo_practicable", "toit_ouv");
 
-      // Marca/Gama/Modelo (selects) + fallback libre
-      this._setValue(document.querySelector("#marque"), vd.eu_marca);
-      this._setValue(document.querySelector("#gamme"), vd.eu_gama);
-      this._setValue(document.querySelector("#modele"), vd.eu_modelo);
-      const modele = document.querySelector("#modele");
-      if (modele && ![...modele.options].some((o) => o.value == vd.eu_modelo)) {
-        this._setValue(
-          document.querySelector("#modele_free"),
-          vd.modelo || vd.eu_modelo
-        );
-        this._setValue(
-          document.querySelector("#modele_libre"),
-          vd.modelo || vd.eu_modelo
-        );
-      }
+      // Marca / Gama / Modelo con fallback (AddCombo-like)
+      this._setMarcaGamaModelo(vd);
+
 
       await this._wait(500);
       return true;
