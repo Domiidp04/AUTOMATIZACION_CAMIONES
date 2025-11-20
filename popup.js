@@ -63,8 +63,33 @@ const BRANDS = {
       "MAQUINAR",
     ],
   },
+  EUCARMO: {
+  id: "100",
+  label: "Eucarmo",
+  carrocerias: [
+    "todos",
+    "FRIGO",
+    "GRUA",
+    "GANCHO",
+    "SEMI-TAUTLINER",
+    "PORTAMAQUINARIA",
+    "FURGON",
+    "BASCULANTE",
+    "TAUTLINE",
+    "GANADERO",
+    "CHASIS",
+    "HORMIGON",
+    "GANCHO+GRUA",
+    "TRACTO",
+    "CAJA ABIERTA",
+    "CARRILLEROS",
+    "CISTERNA",
+    "TWISTLOCK"
+  ],
+},
+
 };
-const BRAND_ORDER = ["SALGAR", "YOURTRUCK", "LASCOLINAS"];
+const BRAND_ORDER = ["SALGAR", "YOURTRUCK", "LASCOLINAS", "EUCARMO"];
 
 // ===============================
 // 🌐 Constantes/estado global
@@ -591,6 +616,8 @@ function startAutomation() {
   processNextVehicle();
 }
 
+// === popup.js ===
+// Reemplaza COMPLETO processNextVehicle por esta versión
 function processNextVehicle() {
   if (!isProcessingQueue || currentProcessingIndex >= vehicleQueue.length) {
     completeAllAutomation();
@@ -599,116 +626,95 @@ function processNextVehicle() {
 
   const codigo = vehicleQueue[currentProcessingIndex];
   updateQueueInfo();
-  addLog(
-    `🔍 Procesando vehículo ${currentProcessingIndex + 1}/${
-      vehicleQueue.length
-    }: ${codigo}`,
-    "info"
-  );
+  addLog(`🔍 Procesando vehículo ${currentProcessingIndex + 1}/${vehicleQueue.length}: ${codigo}`, "info");
+
+  // Lee la carrocería elegida en el popup y la marca
+  const popupCarroceria = (document.getElementById("carroceria")?.value || "").toString().trim().toUpperCase();
+  const popupBrandKey   = currentBrandKey || (document.getElementById("cliente")?.value || "");
+  addLog(`🧭 Popup -> carrocería="${popupCarroceria}" (brand=${popupBrandKey})`, "info");
 
   // Traer datos del backend
   fetch(`${ruta}/truck/scr/buscarvehiculo.php`, {
     method: "POST",
     headers: { "Content-Type": "application/x-www-form-urlencoded" },
-    body: `codigo=${encodeURIComponent(codigo)}&cliente=${encodeURIComponent(
-      codigocliente
-    )}`,
+    body: `codigo=${encodeURIComponent(codigo)}&cliente=${encodeURIComponent(codigocliente)}`
   })
-    .then((r) => r.text())
-    .then(async (txt) => {
-      let vehicleData;
-      try {
-        vehicleData = JSON.parse(txt);
-      } catch (e) {
-        addLog(
-          `❌ Error procesando datos del vehículo ${codigo}: ${e.message}`,
-          "error"
-        );
-        setTimeout(() => {
-          currentProcessingIndex++;
-          processNextVehicle();
-        }, 1200);
-        return;
-      }
-
-      currentVehicleData = vehicleData;
-
-      // Asegurar Autoline y content-script
-      const [activeTab] = await chrome.tabs.query({
-        active: true,
-        currentWindow: true,
-      });
-      const url = activeTab?.url || "";
-      const allowed =
-  url.includes("autoline.es") ||
-  /europa-camiones\./i.test(url) ||
-  /(^|\.)via-mobilis\.com/i.test(url);
-
-      if (!allowed) {
-        addLog("❌ Debes estar en autoline.es o europacamiones", "error");
-        updateStatus("Error: No estás en un sitio compatible", "error");
-        stopQueueProcessing();
-        return;
-      }
-
-      try {
-       // RESET limpio (tolerante a fallo)
-if (!startInFlight) {
-  startInFlight = true;
-  try {
-    await safeSendMessage(activeTab.id, { type: "RESET_AUTOMATION" }).catch(()=>{});
-    await new Promise((r) => setTimeout(r, 300));
-
-    const resp = await safeSendMessage(activeTab.id, {
-      type: "START_AUTOMATION",
-      vehicleData,
-      isQueueProcessing: true,
-      queueInfo: {
-        current: currentProcessingIndex + 1,
-        total: vehicleQueue.length,
-        vehicleCode: codigo,
-        justStarted: true
-      }
-    });
-
-    if (resp?.success) {
-      addLog(`✅ Automatización iniciada para ${codigo}`, "success");
-      updateStatus(`Procesando ${codigo}`, "info");
-      toggleButtons(true);
-      showProgress();
-    } else {
-      addLog(`❌ Error del content-script ${codigo}: ${resp?.error || "desconocido"}`, "error");
+  .then(r => r.text())
+  .then(async (txt) => {
+    let vehicleData;
+    try {
+      vehicleData = JSON.parse(txt);
+    } catch (e) {
+      addLog(`❌ Error procesando datos del vehículo ${codigo}: ${e.message}`, "error");
       setTimeout(() => { currentProcessingIndex++; processNextVehicle(); }, 1200);
+      return;
     }
-  } catch (err) {
-    addLog(`❌ Error comunicación con ${codigo}: ${err?.message || err}`, "error");
-    setTimeout(() => { currentProcessingIndex++; processNextVehicle(); }, 1200);
-  } finally {
-    // Dale un pequeño colchón para que no reintente START inmediatamente
-    setTimeout(() => { startInFlight = false; }, 600);
-  }
-} else {
-  addLog("⏳ Arranque en curso, evitando duplicado…", "info");
-}
 
-      } catch (err) {
-        addLog(
-          `❌ Error comunicación con ${codigo}: ${err?.message || err}`,
-          "error"
-        );
-        setTimeout(() => {
-          currentProcessingIndex++;
-          processNextVehicle();
-        }, 1200);
+    currentVehicleData = vehicleData;
+
+    const [activeTab] = await chrome.tabs.query({ active: true, currentWindow: true });
+    const url = activeTab?.url || "";
+    const allowed = (
+      url.includes("autoline.es") ||
+      /europa-camiones\./i.test(url) ||
+      /(^|\.)via-mobilis\.com/i.test(url)
+    );
+    if (!allowed) {
+      addLog("❌ Debes estar en autoline.es o europacamiones", "error");
+      updateStatus("Error: No estás en un sitio compatible", "error");
+      stopQueueProcessing();
+      return;
+    }
+
+    try {
+      if (!startInFlight) {
+        startInFlight = true;
+
+        // Reset tolerante
+        await safeSendMessage(activeTab.id, { type: "RESET_AUTOMATION" }).catch(()=>{});
+        await new Promise(r => setTimeout(r, 300));
+
+        // Lanzar START con la carrocería del popup embebida y también fuera
+        const resp = await safeSendMessage(activeTab.id, {
+          type: "START_AUTOMATION",
+          vehicleData: {
+            ...vehicleData,
+            __carroceriaPopup: popupCarroceria
+          },
+          selectedCarroceria: popupCarroceria,
+          selectedBrandKey: popupBrandKey,
+          isQueueProcessing: true,
+          queueInfo: {
+            current: currentProcessingIndex + 1,
+            total: vehicleQueue.length,
+            vehicleCode: codigo,
+            justStarted: true
+          }
+        });
+
+        if (resp?.success) {
+          addLog(`✅ Automatización iniciada para ${codigo}`, "success");
+          updateStatus(`Procesando ${codigo}`, "info");
+          toggleButtons(true);
+          showProgress();
+        } else {
+          addLog(`❌ Error del content-script ${codigo}: ${resp?.error || "desconocido"}`, "error");
+          setTimeout(() => { currentProcessingIndex++; processNextVehicle(); }, 1200);
+        }
+      } else {
+        addLog("⏳ Arranque en curso, evitando duplicado…", "info");
       }
-    })
-    .catch(() => {
-      addLog(`❌ Error cargando datos del vehículo ${codigo}`, "error");
-      setTimeout(() => {
-        currentProcessingIndex++;
-        processNextVehicle();
-      }, 1200);
-    });
+    } catch (err) {
+      addLog(`❌ Error comunicación con ${codigo}: ${err?.message || err}`, "error");
+      setTimeout(() => { currentProcessingIndex++; processNextVehicle(); }, 1200);
+    } finally {
+      setTimeout(() => { startInFlight = false; }, 600);
+    }
+  })
+  .catch(() => {
+    addLog(`❌ Error cargando datos del vehículo ${codigo}`, "error");
+    setTimeout(() => { currentProcessingIndex++; processNextVehicle(); }, 1200);
+  });
 }
 
 // ===============================
