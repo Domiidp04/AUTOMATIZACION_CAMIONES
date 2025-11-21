@@ -564,18 +564,21 @@ function toggleAutomationPanel() {
   if (visible) {
     chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
       const url = tabs[0]?.url || "";
-      const site =
-  url.includes("autoline.es") ? "autoline.es" :
-  /europa-camiones\./i.test(url) ? "europa-camiones.com" :
-  /(^|\.)via-mobilis\.com/i.test(url) ? "my.via-mobilis.com" :
-  null;
 
+      const site =
+        url.includes("autoline.es") ? "autoline.es" :
+        /europa-camiones\./i.test(url) ? "europa-camiones.com" :
+        /(^|\.)via-mobilis\.com/i.test(url) ? "my.via-mobilis.com" :
+        /(^|\.)beta\.pro\.coches\.net/i.test(url) ? "beta.pro.coches.net" :
+        /(^|\.)pro\.coches\.net/i.test(url) ? "pro.coches.net" :
+        /(^|\.)coches\.net/i.test(url) ? "coches.net" :
+        null;
 
       if (site)
         addLog(`✅ Detectado ${site} - Listo para automatizar`, "success");
       else
         addLog(
-          "⚠️ Ve a autoline.es o europacamiones para usar la automatización",
+          "⚠️ Debes estar en Autoline, Europa-Camiones o Coches.net para usar la automatización",
           "info"
         );
     });
@@ -654,11 +657,11 @@ function processNextVehicle() {
 
     const [activeTab] = await chrome.tabs.query({ active: true, currentWindow: true });
     const url = activeTab?.url || "";
-    const allowed = (
-      url.includes("autoline.es") ||
-      /europa-camiones\./i.test(url) ||
-      /(^|\.)via-mobilis\.com/i.test(url)
-    );
+const allowed =
+  url.includes("autoline.es") ||
+  /europa-camiones\./i.test(url) ||
+  /via-mobilis\.com/i.test(url) ||
+  /pro\.coches\.net/i.test(url); // beta.pro.coches.net y pro.coches.net
     if (!allowed) {
       addLog("❌ Debes estar en autoline.es o europacamiones", "error");
       updateStatus("Error: No estás en un sitio compatible", "error");

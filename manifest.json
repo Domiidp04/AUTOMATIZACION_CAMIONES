@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
-  "name": "Truck Manager (Autoline + Europa-Camiones)",
-  "description": "Automatización para Autoline.es y europa-camiones.com.",
-  "version": "5.1.0",
+  "name": "Truck Manager (COCHES.NET)",
+  "description": "Automatización para Autoline.es, europa-camiones.com y coches.net",
+  "version": "1.0.0",
 
   "action": { "default_popup": "popup.html" },
 
