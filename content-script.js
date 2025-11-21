@@ -2806,6 +2806,9 @@ if (window.__cochesNetAuto) {
   class CochesNetAutomation {
     constructor() {
       // Estado básico
+      this.LOCAL_PHOTOS_BASE = "http://127.0.0.1/photos";
+      this.MAX_PHOTOS = 30; 
+
       this.currentStep = 0;
       this.isRunning = false;
       this.vehicleData = null;
@@ -3023,6 +3026,13 @@ if (window.__cochesNetAuto) {
         return;
       }
 
+          // 🕒 Pausa extra después del paso de fotos para que la SPA suba bien las imágenes
+    if (step.name === "fotos") {
+      this._log("⏱ Esperando 5s para que Coches.net procese y guarde las fotos…", "info");
+      await this._wait(5000);
+    }
+
+
       this._log(`✔ OK: ${step.desc}`, "success");
       this.currentStep++;
       await this._wait(500);
@@ -3124,27 +3134,15 @@ if (window.__cochesNetAuto) {
 
       // Carrocería → Caja abierta
       await this._clickSelectAndChoose("#bodyTypeIdDoors", "Caja abierta");
-
-      // Garantía → 6 meses
-      await this._clickSelectAndChoose("#warrantyMonths", "6 meses");
-
+      
       // Marca (autocomplete)
       if (v.marca) {
         await this._inputAutocomplete("#makeId", v.marca);
       }
-
+      
       // Modelo
       if (v.modelo) this._setValue("#modelVersion", v.modelo);
-
-      // Potencia
-      if (v.potencia) this._setValue("#engine", v.potencia);
-
-      // Kilómetros
-      if (v.kilometros) this._setValue("#kilometers", v.kilometros);
-
-      // Precio
-      if (v.precio) this._setValue("#cashPrice", v.precio);
-
+      
       // Año matriculación
       if (v.fecha_matriculacion) {
         const year = String(v.fecha_matriculacion).substring(0, 4);
@@ -3152,6 +3150,28 @@ if (window.__cochesNetAuto) {
           await this._clickSelectAndChoose("#year", year);
         }
       }
+
+      // Potencia
+      if (v.potencia) this._setValue("#engine", v.potencia);
+      
+      // Kilómetros
+      if (v.kilometros) this._setValue("#kilometers", v.kilometros);
+
+      // Referencia interna (no se muestra en el portal)
+      if (v.codigo) {
+        this._setValue("#reference", v.codigo);
+      }
+      
+      // Precio
+        // Precio
+      if (v.precio) {
+        this._setValue("#cashPrice", v.precio);
+        await this._unsetTaxesIncluded();  
+      }
+
+      
+      // Garantía → 6 meses
+      await this._clickSelectAndChoose("#warrantyMonths", "6 meses");
 
       // Descripción
       if (v.informacion_com) {
@@ -3162,6 +3182,115 @@ if (window.__cochesNetAuto) {
     }
 
     // ---------- helpers de inputs ----------
+      // ===== Helpers para leer fotos desde XAMPP (reutiliza FETCH_LOCAL_IMAGE del background) =====
+
+  _sendMessageWithTimeoutCoches(payload, { timeout = 4000 } = {}) {
+    return new Promise((resolve) => {
+      let done = false;
+      const t = setTimeout(() => {
+        if (!done) {
+          done = true;
+          resolve(null);
+        }
+      }, timeout);
+
+      try {
+        chrome.runtime.sendMessage(payload, (resp) => {
+          if (done) return;
+          done = true;
+          clearTimeout(t);
+          resolve(resp || null);
+        });
+      } catch (e) {
+        if (!done) {
+          done = true;
+          clearTimeout(t);
+          resolve(null);
+        }
+      }
+    });
+  }
+
+  async _buscarPrimeraQueExistaCoches(folder, idx) {
+    const exts = [
+      ".jpg",
+      ".jpeg",
+      ".png",
+      ".webp",
+      ".JPG",
+      ".JPEG",
+      ".PNG",
+      ".WEBP",
+    ];
+
+    for (const ex of exts) {
+      const url = `${this.LOCAL_PHOTOS_BASE}/${encodeURIComponent(
+        folder
+      )}/${idx}${ex}`;
+
+      const probe = await this._sendMessageWithTimeoutCoches(
+        { type: "FETCH_LOCAL_IMAGE", url },
+        { timeout: 2000 }
+      );
+
+      if (probe && probe.ok) return url;
+    }
+    return null;
+  }
+
+  async _getDataURLFromLocalCoches(url) {
+    const r = await this._sendMessageWithTimeoutCoches(
+      { type: "FETCH_LOCAL_IMAGE", url },
+      { timeout: 4000 }
+    );
+    return r && r.ok && r.dataURL ? r.dataURL : null;
+  }
+
+  async _dataURLToFileCoches(dataURL, fileName) {
+    const res = await fetch(dataURL);
+    const blob = await res.blob();
+    const type = blob.type || "image/jpeg";
+    return new File([blob], fileName, { type });
+  }
+
+
+      async _unsetTaxesIncluded() {
+    try {
+      // Contenedor del campo impuestos
+      const field = document.querySelector("#field-taxesIncluded");
+      if (!field) {
+        this._log("⚠️ No encuentro el contenedor de 'Impuestos incluídos'", "warning");
+        return;
+      }
+
+      const input  = field.querySelector("#taxesIncluded");
+      const button = field.querySelector("button.sui-AtomCheckbox--Icon");
+
+      if (!input || !button) {
+        this._log("⚠️ No encuentro el checkbox/botón de 'Impuestos incluídos'", "warning");
+        return;
+      }
+
+      const isChecked =
+        input.checked === true ||
+        input.getAttribute("aria-checked") === "true" ||
+        button.classList.contains("is-checked");
+
+      // Si ya está desmarcado no hacemos nada
+      if (!isChecked) {
+        this._log("ℹ️ 'Impuestos incluídos' ya está desmarcado", "info");
+        return;
+      }
+
+      this._log("🔧 Desmarcando 'Impuestos incluídos'…", "info");
+      this._forceClick(button); // clic en el botón visual del checkbox
+      await this._wait(300);
+    } catch (e) {
+      this._log("⚠️ Error al desmarcar 'Impuestos incluídos': " + (e?.message || e), "warning");
+    }
+  }
+
+
     async _clickSelectAndChoose(selector, textToMatch) {
       const input = await this._waitFor(selector, 8000);
       if (!input) {
@@ -3248,12 +3377,90 @@ if (window.__cochesNetAuto) {
       el.dispatchEvent(new Event("change", { bubbles: true }));
     }
 
-    // ========== PASO 4 – Fotos ==========
-    async _fotos() {
-      // De momento no hacemos nada con las fotos en Coches.net
-      this._log("📸 Paso de fotos no implementado (Coches.net)", "info");
-      return true;
+      // ========== PASO 4 – Fotos (Coches.net) ==========
+async _fotos() {
+  const v = this.vehicleData || {};
+  const folder =
+    (v.codigo && String(v.codigo).trim()) ||
+    (v.vehicleId && String(v.vehicleId).trim());
+
+  if (!folder) {
+    this._log("ℹ️ Coches.net: sin carpeta local (codigo / vehicleId)", "info");
+    return true; // seguimos sin fotos
+  }
+
+  const input =
+    document.querySelector('input[type="file"][accept*="image"]') ||
+    document.querySelector('input[type="file"][multiple]') ||
+    document.querySelector('input[type="file"]');
+
+  if (!input) {
+    this._log("❌ Coches.net: no encuentro el <input type='file'> de fotos", "error");
+    return false;
+  }
+
+  const dt = new DataTransfer();
+  let count = 0;
+
+  for (let i = 1; i <= this.MAX_PHOTOS; i++) {
+    const url = await this._buscarPrimeraQueExistaCoches(folder, i);
+    if (!url) {
+      if (i === 1) {
+        this._log(
+          `ℹ️ Coches.net: no hay fotos en ${this.LOCAL_PHOTOS_BASE}/${folder}/`,
+          "info"
+        );
+      }
+      break;
     }
+
+    const dataURL = await this._getDataURLFromLocalCoches(url);
+    if (!dataURL) {
+      this._log(`⚠️ Coches.net: no pude leer ${url}`, "warning");
+      continue;
+    }
+
+    const fileName = i + (url.match(/\.[a-zA-Z0-9]+$/)?.[0] || ".jpg");
+    const file = await this._dataURLToFileCoches(dataURL, fileName);
+
+    dt.items.add(file);
+    count++;
+  }
+
+  if (count === 0) {
+    this._log("ℹ️ Coches.net: sin fotos válidas, sigo al siguiente paso", "info");
+    return true;
+  }
+
+  input.files = dt.files;
+  input.dispatchEvent(new Event("input", { bubbles: true }));
+  input.dispatchEvent(new Event("change", { bubbles: true }));
+
+  const dz =
+    input.closest("[data-testid='photos-dropzone'], .cf-VehiclePhotos-dropZone") ||
+    input.parentElement;
+  if (dz) {
+    try {
+      const dropEvent = new DragEvent("drop", {
+        bubbles: true,
+        cancelable: true,
+        dataTransfer: dt,
+      });
+      dz.dispatchEvent(dropEvent);
+    } catch (_) {}
+  }
+
+  this._log(
+    `📸 Coches.net: añadidas ${count} foto(s) al formulario`,
+    "success"
+  );
+
+  // aquí ya no hace falta el wait largo
+  await this._wait(800);
+  return true;
+}
+
+
 
     // ========== PASO 5 – Confirmar "Insertar vehículo" ==========
     async _clickConfirmarInsertar() {
