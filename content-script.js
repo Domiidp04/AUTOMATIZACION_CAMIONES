@@ -2770,387 +2770,393 @@ async _clickValidar() {
 if (window.__cochesNetAuto) {
   console.warn("Duplicate CochesNetAutomation blocked");
 } else {
+class CochesNetAutomation {
+  constructor() {
+    // Estado básico
+    this.LOCAL_PHOTOS_BASE = "http://127.0.0.1/photos";
+    this.MAX_PHOTOS = 30;
 
-  class CochesNetAutomation {
-    constructor() {
-      // Estado básico
-      this.LOCAL_PHOTOS_BASE = "http://127.0.0.1/photos";
-      this.MAX_PHOTOS = 30; 
+    this.currentStep = 0;
+    this.isRunning = false;
+    this.vehicleData = null;
 
-      this.currentStep = 0;
-      this.isRunning = false;
-      this.vehicleData = null;
+    // Control de reentradas / SPA
+    this._runId = 0;          // cambia en cada START
+    this.retryDelay = 400;
 
-      // Control de reentradas / SPA
-      this._runId = 0;          // cambia en cada START
-      this.retryDelay = 400;
+    this._setupMsgListener();
+  }
 
-      this._setupMsgListener();
-    }
+  // ========== Utilidades básicas ==========
 
-    // ========== Utilidades básicas ==========
-    _log(message, type = "info") {
-      try {
-        chrome.runtime.sendMessage({
-          type: "LOG_UPDATE",
-          data: { message, type }
-        });
-      } catch (e) {
-        console.warn("[CochesNetAutomation LOG]", message, type, e);
-      }
-    }
-
-    _status(text, type = "running") {
-      try {
-        chrome.runtime.sendMessage({
-          type: "STATUS_UPDATE",
-          data: { text, type }
-        });
-      } catch (e) {
-        console.warn("[CochesNetAutomation STATUS]", text, type, e);
-      }
-    }
-
-    _wait(ms) {
-      return new Promise((resolve) => setTimeout(resolve, ms));
-    }
-
-    _forceClick(el) {
-      if (!el) return;
-      try {
-        el.scrollIntoView({ behavior: "smooth", block: "center" });
-      } catch (_) {}
-      try {
-        el.click();
-      } catch {
-        const ev = new MouseEvent("click", { bubbles: true, cancelable: true, view: window });
-        el.dispatchEvent(ev);
-      }
-    }
-
-    async _waitFor(selector, timeout = 8000) {
-      const start = Date.now();
-      while (Date.now() - start < timeout) {
-        const el = document.querySelector(selector);
-        if (el) return el;
-        await this._wait(150);
-      }
-      return null;
-    }
-
-    // ========= Mensajería con background/popup =========
-    _setupMsgListener() {
-      chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
-        (async () => {
-          try {
-            switch (msg.type) {
-              case "PING": {
-                // Permite al popup saber que el CS está vivo
-                sendResponse?.({
-                  success: true,
-                  message: "content-script alive (coches.net)",
-                  status: {
-                    site: "coches",
-                    isRunning: this.isRunning,
-                    currentStep: this.currentStep,
-                    url: window.location.href
-                  }
-                });
-                break;
-              }
-
-              case "START_AUTOMATION": {
-                // Si ya había una ejecución en marcha, la invalido
-                if (this.isRunning) {
-                  this._log("⛔ Deteniendo ejecución previa de Coches.net…", "warning");
-                  this._hardStop();
-                }
-
-                this.vehicleData = msg.vehicleData || null;
-                await this._start();
-                sendResponse?.({ success: true });
-                break;
-              }
-
-              case "STOP_AUTOMATION": {
-                this._log("⛔ STOP_AUTOMATION recibido (coches.net)", "warning");
-                this._hardStop();
-                sendResponse?.({ success: true });
-                break;
-              }
-
-              case "RESET_AUTOMATION": {
-                this._log("🔄 RESET_AUTOMATION (coches.net)", "info");
-                this._hardStop();
-                this.currentStep = 0;
-                this.vehicleData = null;
-                sendResponse?.({ success: true });
-                break;
-              }
-
-              default:
-                break;
-            }
-          } catch (e) {
-            sendResponse?.({ success: false, error: e?.message || String(e) });
-          }
-        })();
-        return true; // async
+  _log(message, type = "info") {
+    try {
+      chrome.runtime.sendMessage({
+        type: "LOG_UPDATE",
+        data: { message, type }
       });
+    } catch (e) {
+      console.warn("[CochesNetAutomation LOG]", message, type, e);
     }
+  }
 
-    _hardStop() {
-      // invalida cualquier cadena de _executeStep en curso
-      this.isRunning = false;
-      this._runId++;
+  _status(text, type = "running") {
+    try {
+      chrome.runtime.sendMessage({
+        type: "STATUS_UPDATE",
+        data: { text, type }
+      });
+    } catch (e) {
+      console.warn("[CochesNetAutomation STATUS]", text, type, e);
     }
+  }
 
-    // ========== Inicio / ciclo principal ==========
-    async _start() {
-      if (!location.host.includes("coches.net")) {
-        this._status("Debes estar en pro.coches.net", "error");
-        this._log("❌ No estás en pro.coches.net", "error");
-        return;
-      }
+  _wait(ms) {
+    return new Promise((resolve) => setTimeout(resolve, ms));
+  }
 
-      this._runId++;
-      const runId = this._runId;
-
-      this.isRunning = true;
-      this.currentStep = 0;
-
-      this._status("Iniciando Coches.net…", "running");
-      this._log("🚀 Iniciando Coches.net…", "info");
-
-      this._executeStep(runId);
+  // Espera a que exista un elemento con el selector, reintentando
+  async _waitFor(selector, timeout = 10000, stepMs = 500) {
+    const start = Date.now();
+    while (Date.now() - start < timeout) {
+      const el = document.querySelector(selector);
+      if (el) return el;
+      await this._wait(stepMs);
     }
+    return null;
+  }
 
-    async _executeStep(runId) {
-      // Si esta ejecución ya no es la activa, salimos silenciosamente
-      if (!this.isRunning || runId !== this._runId) return;
+  // Helper genérico de reintentos (para opciones de selects, etc.)
+  async _retryUntil(fnCheck, timeout = 10000, stepMs = 500) {
+    const start = Date.now();
+    let result = null;
 
-      const STEPS = [
-        { name: "insertarBtn",       desc: "Click en 'Insertar vehículo'" },
-        { name: "categoriaCamion",   desc: "Seleccionar categoría Camión" },
-        { name: "insertarDatos",     desc: "Insertar datos del vehículo" },
-        { name: "fotos",             desc: "Subir fotos" },
-        { name: "confirmarInsertar", desc: "Confirmar Inserción" },
-        { name: "publicarLuego",     desc: "Click en 'Publicar más tarde'" }
-      ];
+    while (Date.now() - start < timeout) {
+      result = fnCheck();
+      if (result) return result;
+      await this._wait(stepMs);
+    }
+    return null;
+  }
 
-      // Evita TypeError cuando currentStep se sale del array
-      if (this.currentStep >= STEPS.length) {
-        await this._complete(runId);
-        return;
-      }
+  _forceClick(el) {
+    if (!el) return;
+    try {
+      el.scrollIntoView({ behavior: "smooth", block: "center" });
+    } catch (_) {}
+    try {
+      el.click();
+    } catch {
+      const ev = new MouseEvent("click", { bubbles: true, cancelable: true, view: window });
+      el.dispatchEvent(ev);
+    }
+  }
 
-      const step = STEPS[this.currentStep];
-      if (!step) {
-        this._log("⚠️ Paso indefinido (currentStep=" + this.currentStep + ")", "warning");
-        await this._complete(runId);
-        return;
-      }
+  // ========= Mensajería con background/popup =========
 
-      this._status(step.desc);
-      this._log(`➡️ Paso ${this.currentStep + 1}: ${step.desc}`, "info");
+  _setupMsgListener() {
+    chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
+      (async () => {
+        try {
+          switch (msg.type) {
+            case "PING": {
+              sendResponse?.({
+                success: true,
+                message: "content-script alive (coches.net)",
+                status: {
+                  site: "coches",
+                  isRunning: this.isRunning,
+                  currentStep: this.currentStep,
+                  url: window.location.href
+                }
+              });
+              break;
+            }
 
-      let ok = false;
-      try {
-        switch (step.name) {
-          case "insertarBtn":
-            ok = await this._clickInsertarVehiculo();
-            break;
-          case "categoriaCamion":
-            ok = await this._seleccionarCategoriaCamion();
-            break;
-          case "insertarDatos":
-            ok = await this._rellenarDatos();
-            break;
-          case "fotos":
-            ok = await this._fotos();
-            break;
-          case "confirmarInsertar":
-            ok = await this._clickConfirmarInsertar();
-            break;
-          case "publicarLuego":
-            ok = await this._clickPublicarMasTarde();
-            break;
-          default:
-            ok = true;
+            case "START_AUTOMATION": {
+              if (this.isRunning) {
+                this._log("⛔ Deteniendo ejecución previa de Coches.net…", "warning");
+                this._hardStop();
+              }
+
+              this.vehicleData = msg.vehicleData || null;
+              await this._start();
+              sendResponse?.({ success: true });
+              break;
+            }
+
+            case "STOP_AUTOMATION": {
+              this._log("⛔ STOP_AUTOMATION recibido (coches.net)", "warning");
+              this._hardStop();
+              sendResponse?.({ success: true });
+              break;
+            }
+
+            case "RESET_AUTOMATION": {
+              this._log("🔄 RESET_AUTOMATION (coches.net)", "info");
+              this._hardStop();
+              this.currentStep = 0;
+              this.vehicleData = null;
+              sendResponse?.({ success: true });
+              break;
+            }
+
+            default:
+              break;
+          }
+        } catch (e) {
+          sendResponse?.({ success: false, error: e?.message || String(e) });
         }
-      } catch (e) {
-        if (runId !== this._runId) return; // era de una ejecución antigua
-        const msg = e?.message || String(e);
-        this._log(`❌ Error en paso "${step.desc}": ${msg}`, "error");
-        this.isRunning = false;
-        return;
-      }
+      })();
+      return true; // async
+    });
+  }
 
-      if (!this.isRunning || runId !== this._runId) return;
+  _hardStop() {
+    this.isRunning = false;
+    this._runId++;
+  }
 
-      if (!ok) {
-        this._log(`❌ Fallo en paso: ${step.desc}`, "error");
-        this.isRunning = false;
-        return;
-      }
+  // ========== Inicio / ciclo principal ==========
 
-          // 🕒 Pausa extra después del paso de fotos para que la SPA suba bien las imágenes
-    if (step.name === "fotos") {
-      this._log("⏱ Esperando 5s para que Coches.net procese y guarde las fotos…", "info");
-      await this._wait(5000);
+  async _start() {
+    if (!location.host.includes("coches.net")) {
+      this._status("Debes estar en pro.coches.net", "error");
+      this._log("❌ No estás en pro.coches.net", "error");
+      return;
     }
 
+    this._runId++;
+    const runId = this._runId;
 
-      this._log(`✔ OK: ${step.desc}`, "success");
-      this.currentStep++;
-      await this._wait(500);
-      this._executeStep(runId);
+    this.isRunning = true;
+    this.currentStep = 0;
+
+    this._status("Iniciando Coches.net…", "running");
+    this._log("🚀 Iniciando Coches.net…", "info");
+
+    this._executeStep(runId);
+  }
+
+  async _executeStep(runId) {
+    if (!this.isRunning || runId !== this._runId) return;
+
+    const STEPS = [
+      { name: "insertarBtn",       desc: "Click en 'Insertar vehículo'" },
+      { name: "categoriaCamion",   desc: "Seleccionar categoría Camión" },
+      { name: "insertarDatos",     desc: "Insertar datos del vehículo" },
+      { name: "fotos",             desc: "Subir fotos" },
+      { name: "confirmarInsertar", desc: "Confirmar Inserción" },
+      { name: "publicarLuego",     desc: "Click en 'Publicar más tarde'" }
+    ];
+
+    if (this.currentStep >= STEPS.length) {
+      await this._complete(runId);
+      return;
     }
 
-    async _complete(runId) {
+    const step = STEPS[this.currentStep];
+    if (!step) {
+      this._log("⚠️ Paso indefinido (currentStep=" + this.currentStep + ")", "warning");
+      await this._complete(runId);
+      return;
+    }
+
+    this._status(step.desc);
+    this._log(`➡️ Paso ${this.currentStep + 1}: ${step.desc}`, "info");
+
+    let ok = false;
+    try {
+      switch (step.name) {
+        case "insertarBtn":
+          ok = await this._clickInsertarVehiculo();
+          break;
+        case "categoriaCamion":
+          ok = await this._seleccionarCategoriaCamion();
+          break;
+        case "insertarDatos":
+          // 🕒 Espera global de 1.5s al llegar a este paso para que la SPA pinte el DOM
+          this._log("⏳ Esperando 1.5s antes de rellenar datos…", "info");
+          await this._wait(1500);
+          ok = await this._rellenarDatos();
+          break;
+        case "fotos":
+          ok = await this._fotos();
+          break;
+        case "confirmarInsertar":
+          ok = await this._clickConfirmarInsertar();
+          break;
+        case "publicarLuego":
+          ok = await this._clickPublicarMasTarde();
+          break;
+        default:
+          ok = true;
+      }
+    } catch (e) {
       if (runId !== this._runId) return;
-
-      this._log("🎉 Coches.net → Vehículo completado", "success");
-      this._status("✅ Vehículo completado en Coches.net", "success");
-
-      // 🔔 Aviso estándar al popup para que avance la cola
-      try {
-        const sessionId = `coches-${Date.now()}-${Math.random()
-          .toString(16)
-          .slice(2)}`;
-        chrome.runtime.sendMessage({
-          type: "AUTOMATION_COMPLETE",
-          data: { sessionId, site: "coches.net" }
-        });
-      } catch (e) {
-        console.warn("[CochesNetAutomation] Error enviando AUTOMATION_COMPLETE", e);
-      }
-
-      // (Opcional) Evento específico por si lo quieres usar en el background
-      try {
-        chrome.runtime.sendMessage({
-          type: "COCHESNET_VEHICLE_DONE",
-          data: { ok: true }
-        });
-      } catch (e) {
-        console.warn("[CochesNetAutomation] Error enviando COCHESNET_VEHICLE_DONE", e);
-      }
-
-      // Volver al stock para el siguiente vehículo (SPA por URL)
-      setTimeout(() => {
-        if (!location.href.includes("/stock")) {
-          window.location.href = "https://beta.pro.coches.net/stock";
-        }
-      }, 800);
-
+      const msg = e?.message || String(e);
+      this._log(`❌ Error en paso "${step.desc}": ${msg}`, "error");
       this.isRunning = false;
-      this.currentStep = 0;
+      return;
     }
 
-    // ========== PASO 1 – Click en "Insertar vehículo" ==========
-    async _clickInsertarVehiculo() {
-      const span = [...document.querySelectorAll("button span.sui-AtomButton-content")]
-        .find(el => /Insertar vehículo/i.test(el.textContent || ""));
+    if (!this.isRunning || runId !== this._runId) return;
 
-      if (!span) {
-        this._log("❌ No encuentro el botón 'Insertar vehículo'", "error");
-        return false;
-      }
-      const btn = span.closest("button");
-      if (!btn) {
-        this._log("❌ Span sin <button> padre para 'Insertar vehículo'", "error");
-        return false;
-      }
-
-      this._forceClick(btn);
-      await this._wait(1200);
-      return true;
+    if (!ok) {
+      this._log(`❌ Fallo en paso: ${step.desc}`, "error");
+      this.isRunning = false;
+      return;
     }
 
-    // ========== PASO 2 – Seleccionar categoría Camión ==========
-    async _seleccionarCategoriaCamion() {
-      const first = await this._waitFor(".cf-FormBodyTypeCategory-categoryLabel", 8000);
-      if (!first) {
-        this._log("❌ No encuentro ningún label de categoría", "error");
-        return false;
-      }
+    this._log(`✔ OK: ${step.desc}`, "success");
+    this.currentStep++;
+    await this._wait(500);
+    this._executeStep(runId);
+  }
 
+  async _complete(runId) {
+    if (runId !== this._runId) return;
+
+    this._log("🎉 Coches.net → Vehículo completado", "success");
+    this._status("✅ Vehículo completado en Coches.net", "success");
+
+    try {
+      const sessionId = `coches-${Date.now()}-${Math.random()
+        .toString(16)
+        .slice(2)}`;
+      chrome.runtime.sendMessage({
+        type: "AUTOMATION_COMPLETE",
+        data: { sessionId, site: "coches.net" }
+      });
+    } catch (e) {
+      console.warn("[CochesNetAutomation] Error enviando AUTOMATION_COMPLETE", e);
+    }
+
+    try {
+      chrome.runtime.sendMessage({
+        type: "COCHESNET_VEHICLE_DONE",
+        data: { ok: true }
+      });
+    } catch (e) {
+      console.warn("[CochesNetAutomation] Error enviando COCHESNET_VEHICLE_DONE", e);
+    }
+
+    setTimeout(() => {
+      if (!location.href.includes("/stock")) {
+        window.location.href = "https://beta.pro.coches.net/stock";
+      }
+    }, 800);
+
+    this.isRunning = false;
+    this.currentStep = 0;
+  }
+
+  // ========== PASO 1 – Click en "Insertar vehículo" ==========
+
+  async _clickInsertarVehiculo() {
+    const span = await this._retryUntil(() => {
+      return (
+        [...document.querySelectorAll("button span.sui-AtomButton-content")]
+          .find(el => /Insertar vehículo/i.test(el.textContent || "")) || null
+      );
+    }, 10000, 500);
+
+    if (!span) {
+      this._log("❌ No encuentro el botón 'Insertar vehículo' tras 10s", "error");
+      return false;
+    }
+    const btn = span.closest("button");
+    if (!btn) {
+      this._log("❌ Span sin <button> padre para 'Insertar vehículo'", "error");
+      return false;
+    }
+
+    this._forceClick(btn);
+    await this._wait(1200);
+    return true;
+  }
+
+  // ========== PASO 2 – Seleccionar categoría Camión ==========
+
+  async _seleccionarCategoriaCamion() {
+    const target = await this._retryUntil(() => {
       const labels = [...document.querySelectorAll(".cf-FormBodyTypeCategory-categoryLabel")];
-      const target = labels.find(el => /camión/i.test((el.textContent || "").trim()));
+      if (!labels.length) return null;
+      return labels.find(el => /camión/i.test((el.textContent || "").trim())) || null;
+    }, 10000, 500);
 
-      if (!target) {
-        this._log("❌ No encuentro la categoría 'Camión'", "error");
-        return false;
-      }
-
-      const container = target.closest(".cf-FormBodyTypeCategory-category") || target;
-      this._forceClick(container);
-      await this._wait(1500);
-      return true;
+    if (!target) {
+      this._log("❌ No encuentro la categoría 'Camión' tras 10s", "error");
+      return false;
     }
 
-    // ========== PASO 3 – Insertar datos vehículo ==========
-    async _rellenarDatos() {
-      const v = this.vehicleData || {};
-      if (!v) {
-        this._log("⚠️ Sin vehicleData en Coches.net", "error");
-        return false;
-      }
+    const container = target.closest(".cf-FormBodyTypeCategory-category") || target;
+    this._forceClick(container);
+    await this._wait(1500);
+    return true;
+  }
 
-      // Subcategoría → Rígido 18T (2 ejes)
-      await this._clickSelectAndChoose("#vehicleTypeId", "18T");
+  // ========== PASO 3 – Insertar datos vehículo ==========
 
-      // Carrocería → Caja abierta
-      await this._clickSelectAndChoose("#bodyTypeIdDoors", "Caja abierta");
-      
-      // Marca (autocomplete)
-      if (v.marca) {
-        await this._inputAutocomplete("#makeId", v.marca);
-      }
-      
-      // Modelo
-      if (v.modelo) this._setValue("#modelVersion", v.modelo);
-      
-      // Año matriculación
-      if (v.fecha_matriculacion) {
-        const year = String(v.fecha_matriculacion).substring(0, 4);
-        if (year) {
-          await this._clickSelectAndChoose("#year", year);
-        }
-      }
-
-      // Potencia
-      if (v.potencia) this._setValue("#engine", v.potencia);
-      
-      // Kilómetros
-      if (v.kilometros) this._setValue("#kilometers", v.kilometros);
-
-      // Referencia interna (no se muestra en el portal)
-      if (v.codigo) {
-        this._setValue("#reference", v.codigo);
-      }
-      
-      // Precio
-        // Precio
-      if (v.precio) {
-        this._setValue("#cashPrice", v.precio);
-        await this._unsetTaxesIncluded();  
-      }
-
-      
-      // Garantía → 6 meses
-      await this._clickSelectAndChoose("#warrantyMonths", "6 meses");
-
-      // Descripción
-      if (v.informacion_com) {
-        this._setValue("#additionalInformation", v.informacion_com);
-      }
-
-      return true;
+  async _rellenarDatos() {
+    const v = this.vehicleData || {};
+    if (!v) {
+      this._log("⚠️ Sin vehicleData en Coches.net", "error");
+      return false;
     }
 
-    // ---------- helpers de inputs ----------
-      // ===== Helpers para leer fotos desde XAMPP (reutiliza FETCH_LOCAL_IMAGE del background) =====
+    // Subcategoría → Rígido 18T (2 ejes)  (aquí usamos el modo “martillo” especial)
+    await this._clickSelectAndChoose("#vehicleTypeId", "18T");
+
+    // Carrocería → Caja abierta  (aquí usamos el comportamiento genérico normal)
+    await this._clickSelectAndChoose("#bodyTypeIdDoors", "Caja abierta");
+
+    // Marca (autocomplete)
+    if (v.marca) {
+      await this._inputAutocomplete("#makeId", v.marca);
+    }
+
+    // Modelo
+    if (v.modelo) this._setValue("#modelVersion", v.modelo);
+
+    // Año matriculación
+    if (v.fecha_matriculacion) {
+      const year = String(v.fecha_matriculacion).substring(0, 4);
+      if (year) {
+        await this._clickSelectAndChoose("#year", year);
+      }
+    }
+
+    // Potencia
+    if (v.potencia) this._setValue("#engine", v.potencia);
+
+    // Kilómetros
+    if (v.kilometros) this._setValue("#kilometers", v.kilometros);
+
+    // Referencia interna
+    if (v.codigo) {
+      this._setValue("#reference", v.codigo);
+    }
+
+    // Precio + quitar “impuestos incluidos”
+    if (v.precio) {
+      this._setValue("#cashPrice", v.precio);
+      await this._unsetTaxesIncluded();
+    }
+
+    // Garantía → 6 meses
+    await this._clickSelectAndChoose("#warrantyMonths", "6 meses");
+
+    // Descripción
+    if (v.informacion_com) {
+      this._setValue("#additionalInformation", v.informacion_com);
+    }
+
+    return true;
+  }
+
+
+  // ===== Helpers XAMPP / fotos =====
 
   _sendMessageWithTimeoutCoches(payload, { timeout = 4000 } = {}) {
     return new Promise((resolve) => {
@@ -3192,9 +3198,7 @@ if (window.__cochesNetAuto) {
     ];
 
     for (const ex of exts) {
-      const url = `${this.LOCAL_PHOTOS_BASE}/${encodeURIComponent(
-        folder
-      )}/${idx}${ex}`;
+      const url = `${this.LOCAL_PHOTOS_BASE}/${encodeURIComponent(folder)}/${idx}${ex}`;
 
       const probe = await this._sendMessageWithTimeoutCoches(
         { type: "FETCH_LOCAL_IMAGE", url },
@@ -3221,10 +3225,8 @@ if (window.__cochesNetAuto) {
     return new File([blob], fileName, { type });
   }
 
-
-      async _unsetTaxesIncluded() {
+  async _unsetTaxesIncluded() {
     try {
-      // Contenedor del campo impuestos
       const field = document.querySelector("#field-taxesIncluded");
       if (!field) {
         this._log("⚠️ No encuentro el contenedor de 'Impuestos incluídos'", "warning");
@@ -3244,235 +3246,337 @@ if (window.__cochesNetAuto) {
         input.getAttribute("aria-checked") === "true" ||
         button.classList.contains("is-checked");
 
-      // Si ya está desmarcado no hacemos nada
       if (!isChecked) {
         this._log("ℹ️ 'Impuestos incluídos' ya está desmarcado", "info");
         return;
       }
 
       this._log("🔧 Desmarcando 'Impuestos incluídos'…", "info");
-      this._forceClick(button); // clic en el botón visual del checkbox
+      this._forceClick(button);
       await this._wait(300);
     } catch (e) {
       this._log("⚠️ Error al desmarcar 'Impuestos incluídos': " + (e?.message || e), "warning");
     }
   }
 
+  // ---------- helpers de inputs / selects ----------
 
-    async _clickSelectAndChoose(selector, textToMatch) {
-      const input = await this._waitFor(selector, 8000);
+  async _clickSelectAndChoose(selector, textToMatch) {
+    // 🔧 MODO MARTILLO para selects "especiales":
+    // - #vehicleTypeId  (subcategoría: 18T…)
+    // - #bodyTypeIdDoors (carrocería: Caja abierta…)
+    if (selector === "#vehicleTypeId" || selector === "#bodyTypeIdDoors") {
+      const totalTimeout = 60000; // 1 minuto
+      const stepMs = 500;         // click cada 0.5s
+      const start = Date.now();
+
+      // Esperamos a que aparezca el input
+      const input = await this._waitFor(selector, totalTimeout, stepMs);
       if (!input) {
-        this._log(`❌ No encuentro el selector ${selector}`, "error");
+        this._log(`❌ No encuentro el selector ${selector} tras 60s`, "error");
         return false;
       }
 
-      this._forceClick(input);
-      await this._wait(300);
+      // Raíz del select y UL de opciones asociado
+      const root =
+        input.closest(".sui-MoleculeSelect") ||
+        input.closest(".cf-FormManager-field") ||
+        document;
 
-      for (let i = 0; i < 20; i++) {
-        const opts = [...document.querySelectorAll(".sui-MoleculeDropdownOption")]
-          .filter(el => el.offsetParent !== null);
+      const ul =
+        root.querySelector(".sui-MoleculeDropdownList") ||
+        root.querySelector("ul.sui-MoleculeDropdownList");
+
+      this._log(`⏳ Modo martillo para ${selector} (1 min, click cada 0.5s)…`, "info");
+
+      while (Date.now() - start < totalTimeout) {
+        // 1) Click en el input para despertar el desplegable
+        this._forceClick(input);
+
+        // 2) Si el UL está oculto (is-hidden / display:none), lo mostramos
+        if (ul) {
+          if (ul.classList.contains("is-hidden")) {
+            ul.classList.remove("is-hidden");
+          }
+          if (ul.style.display === "none") {
+            ul.style.display = "";
+          }
+        }
+
+        // 3) Buscamos opciones visibles dentro del UL (si existe) o la raíz
+        const optionsContainer = ul || root;
+        const opts = [...optionsContainer.querySelectorAll(".sui-MoleculeDropdownOption")]
+          .filter((el) => el.offsetParent !== null);
 
         if (opts.length) {
           const upper = (textToMatch || "").toUpperCase();
-          const opt = opts.find(el =>
+          const opt = opts.find((el) =>
             (el.textContent || "").toUpperCase().includes(upper)
           );
           if (opt) {
+            this._log(`✅ Encontrada opción "${textToMatch}" para ${selector}`, "success");
             this._forceClick(opt);
             await this._wait(300);
             return true;
           }
         }
 
-        await this._wait(150);
+        // 4) Esperamos 0.5s y volvemos a intentar
+        await this._wait(stepMs);
       }
 
-      this._log(`❌ No encontré opción con texto "${textToMatch}" para ${selector}`, "error");
+      this._log(
+        `❌ No encontré opción con texto "${textToMatch}" para ${selector} tras 60s (modo martillo)`,
+        "error"
+      );
       return false;
     }
 
-    async _inputAutocomplete(selector, text) {
-      const input = await this._waitFor(selector, 8000);
-      if (!input) {
-        this._log(`❌ No encuentro el input ${selector}`, "error");
-        return false;
-      }
+    // 🔁 COMPORTAMIENTO GENÉRICO para el resto de selects
+    const input = await this._waitFor(selector, 10000, 500);
+    if (!input) {
+      this._log(`❌ No encuentro el selector ${selector} tras 10s`, "error");
+      return false;
+    }
 
-      input.focus();
-      input.value = text;
-      input.dispatchEvent(new Event("input", { bubbles: true }));
-      input.dispatchEvent(new Event("change", { bubbles: true }));
-      await this._wait(600);
+    this._forceClick(input);
+    await this._wait(300);
 
-      let opts = [];
-      for (let i = 0; i < 15; i++) {
-        opts = [...document.querySelectorAll(".sui-MoleculeDropdownOption")]
-          .filter(el => el.offsetParent !== null);
-        if (opts.length) break;
-        await this._wait(150);
-      }
+    const opt = await this._retryUntil(() => {
+      const opts = [...document.querySelectorAll(".sui-MoleculeDropdownOption")]
+        .filter((el) => el.offsetParent !== null);
 
-      if (!opts.length) {
-        this._log(`❌ No aparecen opciones para el autocomplete ${selector}`, "error");
-        return false;
-      }
+      if (!opts.length) return null;
 
-      const upper = (text || "").toUpperCase();
-      const opt = opts.find(el =>
-        (el.textContent || "").toUpperCase().includes(upper)
+      const upper = (textToMatch || "").toUpperCase();
+      return (
+        opts.find((el) =>
+          (el.textContent || "").toUpperCase().includes(upper)
+        ) || null
       );
+    }, 10000, 500);
 
-      if (!opt) {
-        this._log(`❌ No encuentro en la lista el valor "${text}" para ${selector}`, "error");
-        return false;
-      }
-
-      this._forceClick(opt);
-      await this._wait(300);
-      return true;
+    if (!opt) {
+      this._log(
+        `❌ No encontré opción con texto "${textToMatch}" para ${selector} tras 10s`,
+        "error"
+      );
+      return false;
     }
 
-    _setValue(selector, value) {
-      if (value == null || value === "") return;
-      const el = document.querySelector(selector);
-      if (!el) {
-        this._log(`⚠️ No encuentro el campo ${selector} para asignar valor`, "warning");
-        return;
-      }
-      el.value = value;
-      el.dispatchEvent(new Event("input", { bubbles: true }));
-      el.dispatchEvent(new Event("change", { bubbles: true }));
-    }
-
-      // ========== PASO 4 – Fotos (Coches.net) ==========
-async _fotos() {
-  const v = this.vehicleData || {};
-  const folder =
-    (v.codigo && String(v.codigo).trim()) ||
-    (v.vehicleId && String(v.vehicleId).trim());
-
-  if (!folder) {
-    this._log("ℹ️ Coches.net: sin carpeta local (codigo / vehicleId)", "info");
-    return true; // seguimos sin fotos
-  }
-
-  const input =
-    document.querySelector('input[type="file"][accept*="image"]') ||
-    document.querySelector('input[type="file"][multiple]') ||
-    document.querySelector('input[type="file"]');
-
-  if (!input) {
-    this._log("❌ Coches.net: no encuentro el <input type='file'> de fotos", "error");
-    return false;
-  }
-
-  const dt = new DataTransfer();
-  let count = 0;
-
-  for (let i = 1; i <= this.MAX_PHOTOS; i++) {
-    const url = await this._buscarPrimeraQueExistaCoches(folder, i);
-    if (!url) {
-      if (i === 1) {
-        this._log(
-          `ℹ️ Coches.net: no hay fotos en ${this.LOCAL_PHOTOS_BASE}/${folder}/`,
-          "info"
-        );
-      }
-      break;
-    }
-
-    const dataURL = await this._getDataURLFromLocalCoches(url);
-    if (!dataURL) {
-      this._log(`⚠️ Coches.net: no pude leer ${url}`, "warning");
-      continue;
-    }
-
-    const fileName = i + (url.match(/\.[a-zA-Z0-9]+$/)?.[0] || ".jpg");
-    const file = await this._dataURLToFileCoches(dataURL, fileName);
-
-    dt.items.add(file);
-    count++;
-  }
-
-  if (count === 0) {
-    this._log("ℹ️ Coches.net: sin fotos válidas, sigo al siguiente paso", "info");
+    this._forceClick(opt);
+    await this._wait(300);
     return true;
   }
 
-  input.files = dt.files;
-  input.dispatchEvent(new Event("input", { bubbles: true }));
-  input.dispatchEvent(new Event("change", { bubbles: true }));
 
-  const dz =
-    input.closest("[data-testid='photos-dropzone'], .cf-VehiclePhotos-dropZone") ||
-    input.parentElement;
-  if (dz) {
-    try {
-      const dropEvent = new DragEvent("drop", {
-        bubbles: true,
-        cancelable: true,
-        dataTransfer: dt,
-      });
-      dz.dispatchEvent(dropEvent);
-    } catch (_) {}
+  async _inputAutocomplete(selector, text) {
+    const input = await this._waitFor(selector, 10000, 500);
+    if (!input) {
+      this._log(`❌ No encuentro el input ${selector} tras 10s`, "error");
+      return false;
+    }
+
+    input.focus();
+    input.value = text;
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+    input.dispatchEvent(new Event("change", { bubbles: true }));
+    await this._wait(600);
+
+    const opt = await this._retryUntil(() => {
+      const opts = [...document.querySelectorAll(".sui-MoleculeDropdownOption")]
+        .filter(el => el.offsetParent !== null);
+
+      if (!opts.length) return null;
+
+      const upper = (text || "").toUpperCase();
+      return opts.find(el =>
+        (el.textContent || "").toUpperCase().includes(upper)
+      ) || null;
+    }, 10000, 500);
+
+    if (!opt) {
+      this._log(
+        `❌ No encuentro en la lista el valor "${text}" para ${selector} tras 10s`,
+        "error"
+      );
+      return false;
+    }
+
+    this._forceClick(opt);
+    await this._wait(300);
+    return true;
   }
 
-  this._log(
-    `📸 Coches.net: añadidas ${count} foto(s) al formulario`,
-    "success"
-  );
+  _setValue(selector, value) {
+    if (value == null || value === "") return;
+    const el = document.querySelector(selector);
+    if (!el) {
+      this._log(`⚠️ No encuentro el campo ${selector} para asignar valor`, "warning");
+      return;
+    }
+    el.value = value;
+    el.dispatchEvent(new Event("input", { bubbles: true }));
+    el.dispatchEvent(new Event("change", { bubbles: true }));
+  }
 
-  // aquí ya no hace falta el wait largo
-  await this._wait(800);
-  return true;
-}
+  // ========== PASO 4 – Fotos (Coches.net) ==========
 
+  async _fotos() {
+    const v = this.vehicleData || {};
+    const folder =
+      (v.codigo && String(v.codigo).trim()) ||
+      (v.vehicleId && String(v.vehicleId).trim());
 
-
-    // ========== PASO 5 – Confirmar "Insertar vehículo" ==========
-    async _clickConfirmarInsertar() {
-      const span = [...document.querySelectorAll("button span.sui-AtomButton-content")]
-        .find(el => /Insertar vehículo/i.test(el.textContent || "") ||
-                    /Confirmar inserci[oó]n/i.test(el.textContent || ""));
-
-      if (!span) {
-        this._log("❌ No encuentro el botón de confirmar inserción", "error");
-        return false;
-      }
-
-      const btn = span.closest("button");
-      if (!btn) {
-        this._log("❌ Span sin <button> padre en confirmar inserción", "error");
-        return false;
-      }
-
-      this._forceClick(btn);
-      await this._wait(1500);
+    if (!folder) {
+      this._log("ℹ️ Coches.net: sin carpeta local (codigo / vehicleId)", "info");
       return true;
     }
 
-    // ========== PASO 6 – "Publicar más tarde" ==========
-    async _clickPublicarMasTarde() {
+    const input =
+      document.querySelector('input[type="file"][accept*="image"]') ||
+      document.querySelector('input[type="file"][multiple]') ||
+      document.querySelector('input[type="file"]');
+
+    if (!input) {
+      this._log("❌ Coches.net: no encuentro el <input type='file'> de fotos", "error");
+      return false;
+    }
+
+    const dt = new DataTransfer();
+    let count = 0;
+
+    for (let i = 1; i <= this.MAX_PHOTOS; i++) {
+      const url = await this._buscarPrimeraQueExistaCoches(folder, i);
+      if (!url) {
+        if (i === 1) {
+          this._log(
+            `ℹ️ Coches.net: no hay fotos en ${this.LOCAL_PHOTOS_BASE}/${folder}/`,
+            "info"
+          );
+        }
+        break;
+      }
+
+      const dataURL = await this._getDataURLFromLocalCoches(url);
+      if (!dataURL) {
+        this._log(`⚠️ Coches.net: no pude leer ${url}`, "warning");
+        continue;
+      }
+
+      const fileName = i + (url.match(/\.[a-zA-Z0-9]+$/)?.[0] || ".jpg");
+      const file = await this._dataURLToFileCoches(dataURL, fileName);
+
+      dt.items.add(file);
+      count++;
+    }
+
+    if (count === 0) {
+      this._log("ℹ️ Coches.net: sin fotos válidas, sigo al siguiente paso", "info");
+      return true;
+    }
+
+    input.files = dt.files;
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+    input.dispatchEvent(new Event("change", { bubbles: true }));
+
+    const dz =
+      input.closest("[data-testid='photos-dropzone'], .cf-VehiclePhotos-dropZone") ||
+      input.parentElement;
+    if (dz) {
+      try {
+        const dropEvent = new DragEvent("drop", {
+          bubbles: true,
+          cancelable: true,
+          dataTransfer: dt,
+        });
+        dz.dispatchEvent(dropEvent);
+      } catch (_) {}
+    }
+
+    this._log(
+      `📸 Coches.net: añadidas ${count} foto(s) al formulario`,
+      "success"
+    );
+
+    return true;
+  }
+
+
+  // ========== PASO 5 – Confirmar "Insertar vehículo" ==========
+
+  async _clickConfirmarInsertar() {
+        // ⏱ Espera larga para que el portal suba/procese las fotos
+    this._log("⏳ Esperando 5s para que Coches.net procese las fotos…", "info");
+    await this._wait(5000);
+    const span = await this._retryUntil(() => {
+      return (
+        [...document.querySelectorAll("button span.sui-AtomButton-content")]
+          .find(el =>
+            /Insertar vehículo/i.test(el.textContent || "") ||
+            /Confirmar inserci[oó]n/i.test(el.textContent || "")
+          ) || null
+      );
+    }, 10000, 500);
+
+    if (!span) {
+      this._log("❌ No encuentro el botón de confirmar inserción tras 10s", "error");
+      return false;
+    }
+
+    const btn = span.closest("button");
+    if (!btn) {
+      this._log("❌ Span sin <button> padre en confirmar inserción", "error");
+      return false;
+    }
+
+    this._forceClick(btn);
+    await this._wait(1500);
+    return true;
+  }
+
+  // ========== PASO 6 – "Publicar más tarde" ==========
+
+  async _clickPublicarMasTarde() {
+    const totalTimeout = 30000; // 30s
+    const stepMs = 500;
+    const start = Date.now();
+
+    this._log("⏳ Buscando botón 'Publicar más tarde' (modo martillo suave, 30s)…", "info");
+
+    while (Date.now() - start < totalTimeout) {
+      // 1) Buscar el span con el texto
       const span = [...document.querySelectorAll("button span.sui-AtomButton-content")]
         .find(el => /Publicar m[aá]s tarde/i.test(el.textContent || ""));
 
-      if (!span) {
-        this._log("❌ No encuentro el botón 'Publicar más tarde'", "error");
-        return false;
+      if (span) {
+        const btn = span.closest("button");
+        if (!btn) {
+          this._log("⚠️ Span sin <button> padre en 'Publicar más tarde'", "warning");
+        } else {
+          this._log("✅ Encontrado botón 'Publicar más tarde', haciendo click…", "success");
+          this._forceClick(btn);
+          await this._wait(1500); // dejamos tiempo a la SPA para navegar/cerrar modal
+          return true;
+        }
       }
 
-      const btn = span.closest("button");
-      if (!btn) {
-        this._log("❌ Span sin <button> padre en 'Publicar más tarde'", "error");
-        return false;
-      }
+      // 2) Ayudamos a que aparezca por si está fuera de viewport
+      try {
+        window.scrollBy(0, 200);
+      } catch (_) {}
 
-      this._forceClick(btn);
-      await this._wait(1500);
-      return true;
+      // 3) Esperamos y reintentamos
+      await this._wait(stepMs);
     }
+
+    this._log("❌ No encuentro el botón 'Publicar más tarde' tras 30s (modo martillo)", "error");
+    return false;
   }
+
+}
+
+
 
   // Instanciamos UNA sola vez
   window.__cochesNetAuto = new CochesNetAutomation();
