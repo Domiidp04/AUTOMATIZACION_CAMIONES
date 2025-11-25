@@ -3536,42 +3536,84 @@ class CochesNetAutomation {
   }
 
   // ========== PASO 6 – "Publicar más tarde" ==========
-
-  async _clickPublicarMasTarde() {
-    const totalTimeout = 30000; // 30s
-    const stepMs = 500;
+  async _waitWhileInserting(timeout = 60000, stepMs = 500) {
     const start = Date.now();
+    let hasSeenSpinner = false;
 
-    this._log("⏳ Buscando botón 'Publicar más tarde' (modo martillo suave, 30s)…", "info");
+    this._log("⏳ Comprobando si aparece 'Insertando tu vehículo en tu stock'…", "info");
 
-    while (Date.now() - start < totalTimeout) {
-      // 1) Buscar el span con el texto
-      const span = [...document.querySelectorAll("button span.sui-AtomButton-content")]
-        .find(el => /Publicar m[aá]s tarde/i.test(el.textContent || ""));
+    while (Date.now() - start < timeout) {
+      const container = document.querySelector(".cf-PageInfoWaiting-content");
+      const textEl = container
+        ? container.querySelector(".cf-PageInfoWaiting-text")
+        : null;
 
-      if (span) {
-        const btn = span.closest("button");
-        if (!btn) {
-          this._log("⚠️ Span sin <button> padre en 'Publicar más tarde'", "warning");
-        } else {
-          this._log("✅ Encontrado botón 'Publicar más tarde', haciendo click…", "success");
-          this._forceClick(btn);
-          await this._wait(1500); // dejamos tiempo a la SPA para navegar/cerrar modal
-          return true;
+      const text = (textEl && textEl.textContent) ? textEl.textContent.trim() : "";
+
+      const isInserting =
+        !!container &&
+        !!text &&
+        /Insertando tu veh[ií]culo en tu stock/i.test(text);
+
+      if (isInserting) {
+        if (!hasSeenSpinner) {
+          hasSeenSpinner = true;
+          this._log("⏳ Detectado overlay 'Insertando tu vehículo en tu stock'. Esperando a que termine…", "info");
         }
+        await this._wait(stepMs);
+        continue;
       }
 
-      // 2) Ayudamos a que aparezca por si está fuera de viewport
-      try {
-        window.scrollBy(0, 200);
-      } catch (_) {}
+      // Si ya lo vimos y ahora ha desaparecido, damos OK
+      if (hasSeenSpinner) {
+        this._log("✅ Overlay 'Insertando tu vehículo en tu stock' desaparecido. Continuamos.", "success");
+      } else {
+        this._log("ℹ️ No se ha mostrado overlay de 'Insertando tu vehículo en tu stock'", "info");
+      }
 
-      // 3) Esperamos y reintentamos
-      await this._wait(stepMs);
+      return true;
     }
 
-    this._log("❌ No encuentro el botón 'Publicar más tarde' tras 30s (modo martillo)", "error");
+    this._log(
+      `⚠️ El mensaje 'Insertando tu vehículo en tu stock' sigue (o no ha desaparecido) tras ${timeout / 1000}s`,
+      "warning"
+    );
     return false;
+  }
+
+  async _clickPublicarMasTarde() {
+    this._log("⏳ Buscando botón 'Publicar más tarde' con reintentos…", "info");
+
+    // 1) Buscar el span del botón con reintentos
+    const span = await this._retryUntil(() => {
+      return (
+        [...document.querySelectorAll("button span.sui-AtomButton-content")]
+          .find(el => /Publicar m[aá]s tarde/i.test(el.textContent || "")) || null
+      );
+    }, 15000, 500);
+
+    if (!span) {
+      this._log("❌ No encuentro el botón 'Publicar más tarde' tras 15s", "error");
+      return false;
+    }
+
+    const btn = span.closest("button");
+    if (!btn) {
+      this._log("❌ Span sin <button> padre en 'Publicar más tarde'", "error");
+      return false;
+    }
+
+    // 2) Click "fuerte" sobre el botón
+    this._log("🖱 Haciendo click en 'Publicar más tarde'…", "info");
+    this._forceClick(btn);
+
+    // Deja un pequeño margen para que empiece la petición
+    await this._wait(1500);
+
+    // 3) Si aparece el overlay de "Insertando tu vehículo en tu stock", esperar a que desaparezca
+    await this._waitWhileInserting(60000, 500);
+
+    return true;
   }
 
 }
