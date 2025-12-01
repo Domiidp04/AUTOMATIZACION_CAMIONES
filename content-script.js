@@ -3105,10 +3105,10 @@ class CochesNetAutomation {
       return false;
     }
 
-    // Subcategoría → Rígido 18T (2 ejes)  (aquí usamos el modo “martillo” especial)
+    // Subcategoría → Rígido 18T (2 ejes)  (aquí puedes activar martillo si quieres)
     await this._clickSelectAndChoose("#vehicleTypeId", "18T");
 
-    // Carrocería → Caja abierta  (aquí usamos el comportamiento genérico normal)
+    // Carrocería → Caja abierta
     await this._clickSelectAndChoose("#bodyTypeIdDoors", "Caja abierta");
 
     // Marca (autocomplete)
@@ -3130,8 +3130,14 @@ class CochesNetAutomation {
     // Potencia
     if (v.potencia) this._setValue("#engine", v.potencia);
 
+    // Peso Bruto
+    if (v.potencia) this._setValue("#weight", v.peso_vacio);
+
     // Kilómetros
     if (v.kilometros) this._setValue("#kilometers", v.kilometros);
+
+    // Carga útil
+    if (v.carga_util) this._setValue("#loadCapacity", v.carga_util);
 
     // Referencia interna
     if (v.codigo) {
@@ -3145,15 +3151,64 @@ class CochesNetAutomation {
     }
 
     // Garantía → 6 meses
-    await this._clickSelectAndChoose("#warrantyMonths", "6 meses");
+    await this._clickSelectAndChoose("#warrantyMonths", "Sin garantía");
 
     // Descripción
     if (v.informacion_com) {
       this._setValue("#additionalInformation", v.informacion_com);
     }
 
+    // 🔗 Enlace externo (botón "Enlazar" + input #externalUrlId)
+    await this._setExternalUrlFromVehicle(v);
+
     return true;
   }
+
+    async _setExternalUrlFromVehicle(v) {
+    const url = v && v.longitud;
+    if (!url) {
+      this._log("ℹ️ Sin v.longitud, no relleno el enlace externo", "info");
+      return true; // no es un error, simplemente no hay dato
+    }
+
+    this._log("⏳ Preparando enlace externo (botón 'Enlazar' + URL)…", "info");
+
+    // 1) Buscar el botón "Enlazar" con reintentos
+    const span = await this._retryUntil(() => {
+      return (
+        [...document.querySelectorAll("button span.sui-AtomButton-content")]
+          .find(el => /Enlazar/i.test(el.textContent || "")) || null
+      );
+    }, 10000, 500);
+
+    if (!span) {
+      this._log("❌ No encuentro el botón 'Enlazar' tras 10s", "error");
+      return false;
+    }
+
+    const btn = span.closest("button");
+    if (!btn) {
+      this._log("❌ Span 'Enlazar' sin <button> padre", "error");
+      return false;
+    }
+
+    // 2) Click en el botón Enlazar
+    this._forceClick(btn);
+    await this._wait(500);
+
+    // 3) Esperar al input de URL y rellenarlo
+    const input = await this._waitFor("#externalUrlId", 5000, 500);
+    if (!input) {
+      this._log("❌ No encuentro el input #externalUrlId tras 5s", "error");
+      return false;
+    }
+
+    this._setValue("#externalUrlId", url);
+    this._log(`🔗 Establecida URL externa en #externalUrlId: ${url}`, "success");
+
+    return true;
+  }
+
 
 
   // ===== Helpers XAMPP / fotos =====
