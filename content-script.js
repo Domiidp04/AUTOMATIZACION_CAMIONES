@@ -3884,6 +3884,7 @@ class WallapopAutomation {
       this.currentStep = st[this.storageKeyStep];
       this.vehicleData = st[this.storageKeyData] || this.vehicleData;
       this._log("🔄 Reanudando automatización Wallapop tras navegación…", "info");
+      // aquí sí dejamos una espera porque es “cargar el formulario / navegación”
       setTimeout(() => this._executeStep(), 1200);
     }
   }
@@ -3989,7 +3990,14 @@ class WallapopAutomation {
       this._log(`✅ ${step.desc}`, "success");
       this.currentStep++;
       await this._saveState();
-      setTimeout(() => this._executeStep(), step.waitNav ? 3000 : 600);
+
+      // 🔥 Sin esperas entre pasos salvo cuando hay navegación
+      if (step.waitNav) {
+        // solo en openSell y submit damos margen a la navegación
+        setTimeout(() => this._executeStep(), 3000);
+      } else {
+        this._executeStep();
+      }
     } else {
       this._log(`❌ Error en: ${step.desc}`, "error");
       await this._stop();
@@ -4045,7 +4053,7 @@ class WallapopAutomation {
 
     const moved = await this._waitForUrl(/\/app\/catalog\/upload\/cars/i, 15000);
     if (!moved) {
-      this._log("❌ No he llegado a /app/catalog/upload/cars", "error");
+      this._log("❌ No he llegado a /app/catalog\/upload\/cars", "error");
       return false;
     }
 
@@ -4123,7 +4131,7 @@ class WallapopAutomation {
           return true;
         }
 
-        await this._wait(300);
+        await this._wait(300); // aquí sí: “espera para cargar formulario”
       }
 
       this._log("❌ No se ha podido localizar el formulario de Wallapop dentro del tiempo límite.", "error");
@@ -4152,7 +4160,8 @@ class WallapopAutomation {
 
     this._log("🟢 Click en botón interno de Wallapop (nuevo anuncio)", "info");
     await this._clickShadowButton(wallaButton);
-    await this._delay(5000);
+    // esta espera la mantengo corta porque es parte de “abrir formulario”
+    await this._delay(1500);
     return true;
   }
 
@@ -4167,7 +4176,7 @@ class WallapopAutomation {
     el.value = String(value);
     el.dispatchEvent(new Event("input", { bubbles: true }));
     el.dispatchEvent(new Event("change", { bubbles: true }));
-    await this._delay(20);
+    // 🔥 sin mini-espera aquí
   }
 
   async _txt(selector, value) {
@@ -4178,7 +4187,7 @@ class WallapopAutomation {
     el.value = String(value);
     el.dispatchEvent(new Event("input", { bubbles: true }));
     el.dispatchEvent(new Event("change", { bubbles: true }));
-    await this._delay(20);
+    // 🔥 sin mini-espera aquí
   }
 
   async _selectDropdownItem(dropdownIndex, itemIndex) {
@@ -4190,7 +4199,7 @@ class WallapopAutomation {
       const it = items[itemIndex];
       if (!it) return;
       it.dispatchEvent(new Event("wallaClick"));
-      await this._delay(50);
+      // 🔥 sin espera artificial aquí
     } catch (e) {
       this._log(`⚠️ Error seleccionando dropdown[${dropdownIndex}] item[${itemIndex}]: ${e?.message || e}`, "warning");
     }
@@ -4218,14 +4227,14 @@ class WallapopAutomation {
 
       if (!infoBasica) {
         this._log("🔄 No encuentro aún la sección 'Información básica'", "info");
-        await this._wait(pollMs);
+        await this._wait(pollMs);   // forma parte de “cargar formulario”
         continue;
       }
 
       var manualBrandInput = infoBasica.querySelector('input#brand[tabindex="0"]');
       if (manualBrandInput) {
         this._log("🟢 Marca manual YA está activada.", "info");
-        await this._wait(2000);
+        await this._wait(500);
         return true;
       }
 
@@ -4261,7 +4270,7 @@ class WallapopAutomation {
         this._log("⚠️ Error al hacer click en walla-button: " + e, "warn");
       }
 
-      await this._wait(2000);
+      await this._wait(500);
     }
 
     this._log("❌ No he podido activar la marca manual antes del timeout.", "error");
@@ -4359,12 +4368,7 @@ class WallapopAutomation {
       await this._inp('input[name="location"]', locText);
     }
 
-    const before = location.href;
-    await this._delay(600);
-    if (location.href !== before) {
-      this._log("⚠️ Navegación inesperada tras insertar datos (Wallapop)", "warning");
-    }
-
+    // 🔥 Quitamos la espera y el check de URL aquí
     this._log("📊 Datos insertados en formulario Wallapop", "success");
     return true;
   }
@@ -4525,9 +4529,13 @@ class WallapopAutomation {
       return false;
     }
 
+    // ⏱️ Esperamos 3 segundos ANTES de publicar para que todo se asiente
+    this._log("⏳ Esperando 3s antes de 'Subir producto'…", "info");
+    await this._wait(3000);
+
     this._log("🚀 Click en botón 'Subir producto' (Wallapop)", "info");
     this._forceClick(btn);
-    await this._wait(1000);
+    // 🔥 ya no esperamos después
     return true;
   }
 
@@ -4547,7 +4555,7 @@ class WallapopAutomation {
     trigger.scrollIntoView({ block: "center", behavior: "instant" });
     trigger.click();
 
-    await new Promise(res => setTimeout(res, 400));
+    await new Promise(res => setTimeout(res, 150)); // mínima espera para que abra
 
     const options = Array.from(
       document.querySelectorAll('walla-dropdown-item[aria-label]')
@@ -4567,7 +4575,7 @@ class WallapopAutomation {
     option.scrollIntoView({ block: "center", behavior: "instant" });
     option.click();
 
-    await new Promise(res => setTimeout(res, 200));
+    await new Promise(res => setTimeout(res, 100)); // mínima espera para que se cierre/aplique
 
     this._log(`✅ ${dropdownLabel}: seleccionado "${optionLabel}"`, "info");
     return true;
@@ -4846,6 +4854,7 @@ class WallapopAutomation {
     }
   }
 }
+
 
   // =========================
   // Router multi-sitio (Autoline / Europa-Camiones / Via-Mobilis / Coches.net / Wallapop)
