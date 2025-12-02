@@ -2920,6 +2920,13 @@ class CochesNetAutomation {
   // ========== Inicio / ciclo principal ==========
 
   async _start() {
+    const okHost = /(^|\.)pro\.coches\.net$/i.test(location.host);
+  if (!okHost) {
+    // Antes: this._log("❌ No estás en pro.coches.net", "error");
+    // Ahora simplemente pasamos de largo:
+    return;
+  }
+  
     if (!location.host.includes("coches.net")) {
       this._status("Debes estar en pro.coches.net", "error");
       this._log("❌ No estás en pro.coches.net", "error");
@@ -3672,52 +3679,1222 @@ class CochesNetAutomation {
   }
 
 }
-
-
-
-  // Instanciamos UNA sola vez
-  window.__cochesNetAuto = new CochesNetAutomation();
+ window.__cochesNetAuto = new CochesNetAutomation();
 }
 
+// =========================
+// Wallapop (es.wallapop.com)
+// =========================
 
+class WallapopAutomation {
+  // ===== Config =====
+  PHOTOS_API_BASE = "http://127.0.0.1/photos"; // XAMPP
+  MAX_PHOTOS = 30; // como en tu bot
 
+  constructor() {
+    this.currentStep = 0;
+    this.isRunning = false;
+
+    // Datos del anuncio
+    this.vehicleData = null;      // Truck
+    this.brands = [];
+    this.energies = [];
+    this.gearboxes = [];
+    this.location = null;         // { postalCode, latitude, longitude }
+    this.locationName = "";       // "Madrid"
+    this.referenceSuffix = "";    // sufijo del título
+
+    // Cola / sesión
+    this.isQueueProcessing = false;
+    this.queueInfo = null;
+    this._completedOnce = false;
+    this.sessionId = null;
+
+    // Navegación
+    this._watcher = null;
+    this._lastUrl = location.href;
+
+    // Retries
+    this.maxRetries = 3;
+    this.retryDelay = 800;
+
+    // Estado persistente
+    this.storageKeyRunning = "walla_running";
+    this.storageKeyStep = "walla_step";
+    this.storageKeyData = "walla_data";
+    this.storageKeyCfg  = "walla_cfg";
+
+    // Base local de fotos (reutilizamos helpers de Autoline)
+    this.LOCAL_PHOTOS_BASE = this.PHOTOS_API_BASE;
+
+    // Bloquear Enter durante la automatización
+    this._keydownBlocker = (e) => {
+      if (!this.isRunning) return;
+      if (e.key === "Enter") {
+        e.preventDefault();
+        e.stopPropagation();
+        this._log("⛔ Enter bloqueado (Wallapop) para evitar navegar sin querer", "info");
+      }
+    };
+    window.addEventListener("keydown", this._keydownBlocker, true);
+
+    this._setupMsgListener();
+    this._startNavigationWatcher();
+    this._loadStateAndMaybeResume();
+  }
+
+  // ========================
+  // Mensajería con background/popup
+  // ========================
+  _setupMsgListener() {
+    chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+      (async () => {
+        try {
+          switch (message.type) {
+            case "PING": {
+              sendResponse({
+                success: true,
+                message: "content-script Wallapop alive",
+                status: {
+                  isRunning: this.isRunning,
+                  currentStep: this.currentStep,
+                  url: window.location.href,
+                },
+              });
+              break;
+            }
+
+            case "START_AUTOMATION": {
+              // 1) Datos del vehículo (Truck)
+              if (message.vehicleData) {
+                this.vehicleData = message.vehicleData;
+              }
+
+              // 2) Config extra (marcas, energía, cambios, ubicación, sufijo título)
+              if (Array.isArray(message.brands))   this.brands   = message.brands;
+              if (Array.isArray(message.energies)) this.energies = message.energies;
+              if (Array.isArray(message.gearboxes)) this.gearboxes = message.gearboxes;
+
+              if (message.location) this.location = message.location;
+              if (typeof message.locationName === "string") {
+                this.locationName = message.locationName;
+              }
+              if (typeof message.referenceSuffix === "string") {
+                this.referenceSuffix = message.referenceSuffix.trim();
+              }
+
+              // 3) Modo cola
+              this.isQueueProcessing = !!message.isQueueProcessing;
+              this.queueInfo = message.queueInfo || null;
+
+              if (this.isQueueProcessing && this.queueInfo?.justStarted) {
+                this._log("🔄 Nuevo vehículo en cola (Wallapop): reinicio completo de estado", "info");
+                this.queueInfo.justStarted = false;
+                this.isRunning = false;
+                this.currentStep = 0;
+                this._completedOnce = false;
+                this.sessionId = `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+
+                await chrome.storage.local.remove([
+                  this.storageKeyRunning,
+                  this.storageKeyStep,
+                  this.storageKeyData,
+                  this.storageKeyCfg,
+                ]);
+                await this._delay(300);
+              }
+
+              await this._start();
+              sendResponse?.({ success: true });
+              break;
+            }
+
+            case "STOP_AUTOMATION": {
+              await this._stop();
+              sendResponse?.({ success: true });
+              break;
+            }
+
+            case "RESET_AUTOMATION": {
+              await this._reset();
+              sendResponse?.({ success: true });
+              break;
+            }
+
+            default:
+              break;
+          }
+        } catch (e) {
+          sendResponse?.({ success: false, error: e?.message });
+        }
+      })();
+      return true; // async
+    });
+  }
+
+  _send(type, data) {
+    try {
+      chrome.runtime.sendMessage({ type, data });
+    } catch {}
+  }
+  _status(text, type = "running") {
+    this._send("STATUS_UPDATE", { text, type });
+  }
+  _progress(cur, total) {
+    this._send("PROGRESS_UPDATE", { current: cur, total });
+  }
+  _log(message, type = "info") {
+    this._send("LOG_UPDATE", { message, type });
+  }
+
+  // ========================
+  // Persistencia
+  // ========================
+  async _saveState() {
+    const cfg = {
+      location: this.location,
+      locationName: this.locationName,
+      referenceSuffix: this.referenceSuffix,
+    };
+    await chrome.storage.local.set({
+      [this.storageKeyRunning]: this.isRunning,
+      [this.storageKeyStep]: this.currentStep,
+      [this.storageKeyData]: this.vehicleData,
+      [this.storageKeyCfg]: cfg,
+    });
+  }
+
+  async _loadStateAndMaybeResume() {
+    const st = await chrome.storage.local.get([
+      this.storageKeyRunning,
+      this.storageKeyStep,
+      this.storageKeyData,
+      this.storageKeyCfg,
+    ]);
+
+    if (st[this.storageKeyCfg]) {
+      const cfg = st[this.storageKeyCfg];
+      this.location = cfg.location ?? this.location;
+      this.locationName = cfg.locationName ?? this.locationName;
+      this.referenceSuffix = cfg.referenceSuffix ?? this.referenceSuffix;
+    }
+
+    if (st[this.storageKeyRunning] && typeof st[this.storageKeyStep] === "number") {
+      this.isRunning = true;
+      this.currentStep = st[this.storageKeyStep];
+      this.vehicleData = st[this.storageKeyData] || this.vehicleData;
+      this._log("🔄 Reanudando automatización Wallapop tras navegación…", "info");
+      setTimeout(() => this._executeStep(), 1200);
+    }
+  }
+
+  // ========================
+  // Navegación
+  // ========================
+  _startNavigationWatcher() {
+    if (this._watcher) return;
+    this._watcher = setInterval(async () => {
+      if (location.href !== this._lastUrl) {
+        const old = this._lastUrl;
+        this._lastUrl = location.href;
+        this._log(`📍 [Wallapop] Navegación: ${old} → ${this._lastUrl}`, "info");
+        if (this.isRunning) await this._loadStateAndMaybeResume();
+      }
+    }, 1500);
+  }
+
+  // ========================
+  // Ciclo principal
+  // ========================
+  async _start() {
+    const okHost = /(^|\.)wallapop\.com$/i.test(location.host);
+    if (!okHost) {
+      this._status("Debes estar en es.wallapop.com", "error");
+      this._log("❌ Dominio no es Wallapop", "error");
+      throw new Error("Not on wallapop.com");
+    }
+
+    this.isRunning = true;
+    if (this.currentStep < 0) this.currentStep = 0;
+    await this._saveState();
+
+    this._status("Iniciando automatización (Wallapop)…", "running");
+    this._log("🚀 Automatización iniciada (Wallapop)", "info");
+    this._executeStep();
+  }
+
+  async _stop() {
+    this.isRunning = false;
+    await chrome.storage.local.set({ [this.storageKeyRunning]: false });
+    this._log("⛹️‍♂️ Automatización detenida (Wallapop)", "warning");
+  }
+
+  async _reset() {
+    this.isRunning = false;
+    this.currentStep = 0;
+    this.vehicleData = null;
+    this._completedOnce = false;
+    await chrome.storage.local.remove([
+      this.storageKeyRunning,
+      this.storageKeyStep,
+      this.storageKeyData,
+      this.storageKeyCfg,
+    ]);
+    this._log("🔄 Sistema reiniciado (Wallapop)", "info");
+  }
+
+  async _executeStep() {
+    if (!this.isRunning) return;
+
+    const STEPS = [
+      { name: "openSell",      desc: "Ir a /app/catalog/upload/cars", waitNav: true },
+      { name: "fillData",      desc: "Rellenar datos del vehículo",   waitNav: false },
+      { name: "uploadPhotos",  desc: "Subir fotos del vehículo",      waitNav: false },
+      { name: "submit",        desc: 'Click en "Subir producto"',     waitNav: true },
+    ];
+
+    if (this.currentStep >= STEPS.length) return this._complete();
+
+    const step = STEPS[this.currentStep];
+    this._status(
+      `Paso ${this.currentStep + 1}/${STEPS.length}: ${step.desc}`,
+      "running"
+    );
+    this._progress(this.currentStep, STEPS.length);
+    this._log(`📍 Paso ${this.currentStep + 1} (Wallapop): ${step.desc}`, "info");
+
+    let ok = false;
+    try {
+      switch (step.name) {
+        case "openSell":
+          ok = await this._openSellFlow();
+          break;
+        case "fillData":
+          ok = await this._insertarDatos();
+          break;
+        case "uploadPhotos":
+          ok = await this._subirFotosWallapopFromLocal();
+          break;
+        case "submit":
+          ok = await this._clickSubmit();
+          break;
+      }
+    } catch (e) {
+      this._log(`❌ Excepción en paso Wallapop: ${e?.message || e}`, "error");
+      return this._stop();
+    }
+
+    if (!this.isRunning) return;
+    if (ok) {
+      this._log(`✅ ${step.desc}`, "success");
+      this.currentStep++;
+      await this._saveState();
+      setTimeout(() => this._executeStep(), step.waitNav ? 3000 : 600);
+    } else {
+      this._log(`❌ Error en: ${step.desc}`, "error");
+      await this._stop();
+    }
+  }
+
+  async _complete() {
+    if (this._completedOnce) return;
+    this._completedOnce = true;
+    this.isRunning = false;
+
+    await chrome.storage.local.set({
+      [this.storageKeyRunning]: false,
+      [this.storageKeyStep]: 0,
+    });
+
+    this._status("✅ Vehículo completado (Wallapop)", "success");
+    this._progress(5, 5);
+
+    const sessionId =
+      this.sessionId || `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+    this._send("AUTOMATION_COMPLETE", { sessionId });
+
+    await chrome.storage.local.remove([
+      this.storageKeyRunning,
+      this.storageKeyStep,
+      this.storageKeyData,
+      this.storageKeyCfg,
+    ]);
+
+    this.currentStep = 0;
+    this.vehicleData = null;
+    this._log("🔁 Listo para siguiente vehículo (Wallapop)", "info");
+  }
+
+  // ========================
+  // PASO 1: ir directo a /app/catalog/upload/cars
+  // ========================
+  async _openSellFlow() {
+    if (/\/app\/catalog\/upload\/cars/i.test(location.pathname)) {
+      this._log("ℹ️ Ya estoy en /app/catalog/upload/cars", "info");
+      return true;
+    }
+
+    this._log("➡️ Navegando directamente a /app/catalog/upload/cars", "info");
+
+    const targetUrl = "https://es.wallapop.com/app/catalog/upload/cars";
+    try {
+      location.assign(targetUrl);
+    } catch {
+      location.href = targetUrl;
+    }
+
+    const moved = await this._waitForUrl(/\/app\/catalog\/upload\/cars/i, 15000);
+    if (!moved) {
+      this._log("❌ No he llegado a /app/catalog/upload/cars", "error");
+      return false;
+    }
+
+    this._log("✅ Estoy en /app/catalog/upload/cars", "success");
+    return true;
+  }
+
+  // ========================
+  // PASO 2 opcional: click en "Un vehículo"
+  // ========================
+  async _selectVehicleStep() {
+    if (/\/app\/catalog\/upload\/cars/i.test(location.pathname)) {
+      this._log("ℹ️ Ya estoy en /app/catalog/upload/cars, salto 'Un vehículo'", "info");
+      return true;
+    }
+
+    const findVehicleBtn = () => {
+      const spans = Array.from(
+        document.querySelectorAll(".UploadStepVertical__title, .UploadStepVertical__singleIcon span")
+      );
+      for (const sp of spans) {
+        const txt = (sp.textContent || "").trim().toLowerCase();
+        if (txt.includes("un vehículo") || txt.includes("un vehiculo")) {
+          const btn = sp.closest("button");
+          if (btn) return btn;
+        }
+      }
+      return null;
+    };
+
+    const btn = await this._waitForElement(findVehicleBtn, 8000);
+    if (!btn) {
+      this._log("❌ No encuentro el botón 'Un vehículo'", "error");
+      return false;
+    }
+
+    this._log("🟢 Click en 'Un vehículo'", "info");
+    this._forceClick(btn);
+
+    const okUrl = await this._waitForUrl(/\/app\/catalog\/upload\/cars/i, 15000);
+    if (!okUrl) {
+      const formReady = await this._waitForElement(
+        () => document.querySelector('input[name="brand"], input[name="model"], input[name="title"]'),
+        8000
+      );
+      if (!formReady) {
+        this._log("❌ Tras 'Un vehículo' no aparece el formulario de coches", "error");
+        return false;
+      }
+    }
+    return true;
+  }
+
+  // ========================
+  // PASO 3: esperar formulario
+  // ========================
+  async _esperarFormularioWallapop(timeoutMs = 15000) {
+    try {
+      this._log("⏳ Esperando a que cargue el formulario de Wallapop (coches)...", "info");
+
+      if (!location.href.includes("/app/catalog/upload/cars")) {
+        this._log("⚠️ La URL actual no es la de creación de coche en Wallapop.", "warning");
+      }
+
+      const start = performance.now();
+
+      while (performance.now() - start < timeoutMs) {
+        const form       = document.querySelector("form");
+        const brandInput = document.querySelector("input#brand, input[name='brand']");
+        const titleInput = document.querySelector("input#title, input[name='title']");
+        const kmInput    = document.querySelector("input#km, input[name='km']");
+
+        if (form && brandInput && titleInput && kmInput) {
+          this._log("✅ Formulario de Wallapop localizado correctamente.", "success");
+          return true;
+        }
+
+        await this._wait(300);
+      }
+
+      this._log("❌ No se ha podido localizar el formulario de Wallapop dentro del tiempo límite.", "error");
+      return false;
+
+    } catch (error) {
+      console.error(error);
+      this._log("❌ Error inesperado esperando el formulario de Wallapop.", "error");
+      return false;
+    }
+  }
+
+  // Click al walla-button que abre el formulario de coche (el del flujo)
+  async _prepararFormularioWallapop() {
+    const okUrl = await this._waitForUrl(/\/app\/catalog\/upload\/cars/i, 15000);
+    if (!okUrl) {
+      this._log("❌ No estoy en /app/catalog/upload/cars para preparar formulario", "error");
+      return false;
+    }
+
+    const wallaButton = document.querySelectorAll("walla-button")[1];
+    if (!wallaButton) {
+      this._log("ℹ️ No encuentro walla-button principal, quizá el formulario ya está abierto", "info");
+      return true;
+    }
+
+    this._log("🟢 Click en botón interno de Wallapop (nuevo anuncio)", "info");
+    await this._clickShadowButton(wallaButton);
+    await this._delay(5000);
+    return true;
+  }
+
+  // ========================
+  // Helpers inputs
+  // ========================
+  async _inp(selector, value) {
+    if (value === undefined || value === null) return;
+    const el = document.querySelector(selector);
+    if (!el) return;
+    el.focus();
+    el.value = String(value);
+    el.dispatchEvent(new Event("input", { bubbles: true }));
+    el.dispatchEvent(new Event("change", { bubbles: true }));
+    await this._delay(20);
+  }
+
+  async _txt(selector, value) {
+    if (value === undefined || value === null) return;
+    const el = document.querySelector(selector);
+    if (!el) return;
+    el.focus();
+    el.value = String(value);
+    el.dispatchEvent(new Event("input", { bubbles: true }));
+    el.dispatchEvent(new Event("change", { bubbles: true }));
+    await this._delay(20);
+  }
+
+  async _selectDropdownItem(dropdownIndex, itemIndex) {
+    try {
+      const dropdowns = document.querySelectorAll("walla-dropdown");
+      const dd = dropdowns[dropdownIndex];
+      if (!dd) return;
+      const items = dd.querySelectorAll("walla-list-item");
+      const it = items[itemIndex];
+      if (!it) return;
+      it.dispatchEvent(new Event("wallaClick"));
+      await this._delay(50);
+    } catch (e) {
+      this._log(`⚠️ Error seleccionando dropdown[${dropdownIndex}] item[${itemIndex}]: ${e?.message || e}`, "warning");
+    }
+  }
+
+  // ========================
+  // Click "Añadir marca manualmente"
+  // ========================
+  async _clickAddBrandManual() {
+    var timeoutMs = 15000;
+    var pollMs = 300;
+    var inicio = Date.now();
+
+    while (Date.now() - inicio < timeoutMs) {
+      var secciones = Array.prototype.slice.call(document.querySelectorAll("section.box"));
+      var infoBasica = null;
+
+      for (var i = 0; i < secciones.length; i++) {
+        var h2 = secciones[i].querySelector("h2");
+        if (h2 && /información básica/i.test((h2.textContent || "").toLowerCase())) {
+          infoBasica = secciones[i];
+          break;
+        }
+      }
+
+      if (!infoBasica) {
+        this._log("🔄 No encuentro aún la sección 'Información básica'", "info");
+        await this._wait(pollMs);
+        continue;
+      }
+
+      var manualBrandInput = infoBasica.querySelector('input#brand[tabindex="0"]');
+      if (manualBrandInput) {
+        this._log("🟢 Marca manual YA está activada.", "info");
+        await this._wait(2000);
+        return true;
+      }
+
+      var toggle = infoBasica.querySelector("walla-button");
+      if (!toggle) {
+        this._log("🔄 No encuentro el <walla-button> para cambiar a marca manual.", "info");
+        await this._wait(pollMs);
+        continue;
+      }
+
+      var innerBtn = null;
+      if (toggle.shadowRoot) {
+        innerBtn = toggle.shadowRoot.querySelector("button");
+      }
+
+      try {
+        if (innerBtn && typeof innerBtn.scrollIntoView === "function") {
+          innerBtn.scrollIntoView({ block: "center", behavior: "auto" });
+        } else if (typeof toggle.scrollIntoView === "function") {
+          toggle.scrollIntoView({ block: "center", behavior: "auto" });
+        }
+      } catch (e) {}
+
+      this._log("🖱️ Haciendo click REAL en 'Añadir marca manualmente'…", "info");
+
+      try {
+        if (innerBtn) {
+          innerBtn.click();
+        } else {
+          toggle.click();
+        }
+      } catch (e) {
+        this._log("⚠️ Error al hacer click en walla-button: " + e, "warn");
+      }
+
+      await this._wait(2000);
+    }
+
+    this._log("❌ No he podido activar la marca manual antes del timeout.", "error");
+    return false;
+  }
+
+  // ========================
+  // PASO 2: insertar datos del vehículo en Wallapop
+  // ========================
+  async _insertarDatos() {
+    if (!this.vehicleData) {
+      this._log("⚠️ No hay datos del vehículo; abortando", "error");
+      return false;
+    }
+
+    this._log("🧾 Insertando datos del vehículo en Wallapop…", "info");
+
+    const v = this.vehicleData;
+    const brands    = this.brands    || [];
+    const energies  = this.energies  || [];
+    const gearboxes = this.gearboxes || [];
+
+    const okForm = await this._esperarFormularioWallapop();
+    if (!okForm) return false;
+
+    await this._clickAddBrandManual();
+
+    const brandName = v.marca || "";
+    await this._inp('input[name="brand"]', brandName);
+    this._log(`📝 Marca establecida: ${brandName}`, "info");
+
+    const modelName = v.modelo || "";
+    await this._inp('input[name="model"]', modelName);
+    this._log(`📝 Modelo establecido: ${modelName}`, "info");
+
+    let yearVal = null;
+    if (v.fecha_matriculacion) {
+      const m = /^(\d{4})/.exec(String(v.fecha_matriculacion));
+      if (m) yearVal = m[1];
+    }
+    if (yearVal) {
+      await this._inp('input[name="year"]', yearVal);
+      this._log(`📝 Año establecido: ${yearVal}`, "info");
+    } else {
+      this._log("⚠️ No se ha podido determinar el año a partir de fecha_matriculacion", "warning");
+    }
+
+    const title = `${brandName} ${modelName} ${this.referenceSuffix || ""}`
+      .replace(/\s+/g, " ")
+      .trim();
+    await this._inp('input[name="title"]', title);
+    this._log(`📝 Título establecido: ${title}`, "info");
+
+    const versionVal = v.version || "1";
+    await this._inp('input[name="version"]', versionVal);
+
+    await this._inp('input[name="num_seats"]', v.numero_pla_sen);
+    await this._inp('input[name="num_doors"]', v.numero_pla_pie);
+
+    const potencia = v.potencia ?? v.potency ?? null;
+    if (potencia != null && potencia !== "") {
+      await this._inp('input[name="horsepower"]', String(potencia).trim());
+    }
+
+    const kms = v.kilometros ?? v.km ?? null;
+    if (kms != null && kms !== "") {
+      await this._inp('input[name="km"]', String(kms).trim());
+    }
+
+    // Motor siempre Diésel
+    await this._selectDropdownByAria("Motor", "Diésel");
+
+    // Cambio según v.CAJA_CAMBIO
+    const cambioOpcion = v.CAJA_CAMBIO === "1" ? "Automático" : "Manual";
+    await this._selectDropdownByAria("Cambio", cambioOpcion);
+
+    // Tipo de coche
+    await this._selectDropdownByAria("Tipo de coche", "Otros");
+
+    // Distintivo ambiental
+    await this._selectDropdownByAria("Distintivo ambiental", "Sin etiqueta");
+
+    const desc = v.informacion_com || v.description || "";
+    if (desc) {
+      await this._txt('textarea[name="description"]', desc);
+    }
+
+    const priceVal = (v.precio ?? v.price ?? "1").toString().trim();
+    await this._inp('input[name="sale_price"]', priceVal);
+
+    const locText = `${this.location?.postalCode || ""}, ${this.locationName || ""}`
+      .replace(/^,\s*/, "")
+      .trim();
+    if (locText) {
+      await this._inp('input[name="location"]', locText);
+    }
+
+    const before = location.href;
+    await this._delay(600);
+    if (location.href !== before) {
+      this._log("⚠️ Navegación inesperada tras insertar datos (Wallapop)", "warning");
+    }
+
+    this._log("📊 Datos insertados en formulario Wallapop", "success");
+    return true;
+  }
+
+  // ========================
+  // PASO 3: subir fotos desde XAMPP (LOCAL_PHOTOS_BASE)
+  // ========================
+  async _subirFotosWallapopFromLocal() {
+    const vd = this.vehicleData || {};
+    const vehicleIdFromURL = (location.pathname.match(/\/(\d+)/) || [])[1];
+
+    const folder =
+      (vd.codigo && String(vd.codigo).trim()) ||
+      (vd.vehicleId && String(vd.vehicleId).trim()) ||
+      (vehicleIdFromURL && String(vehicleIdFromURL).trim());
+
+    if (!folder) {
+      this._log(
+        "ℹ️ [WPOP] Sin carpeta local para fotos (vd.codigo/vehicleId). Sigo sin fotos.",
+        "info"
+      );
+      return true;
+    }
+
+    const input = document.querySelector("input[type='file']");
+    if (!input) {
+      this._log(
+        "❌ [WPOP] No encuentro input[type=file] en el formulario.",
+        "error"
+      );
+      return true;
+    }
+
+    const exts = [".jpg", ".jpeg", ".png", ".webp", ".JPG", ".JPEG", ".PNG", ".WEBP"];
+    const dt = new DataTransfer();
+    let uploaded = 0;
+
+    const T0 = Date.now();
+    const DEADLINE_MS = 25000;
+
+    for (let i = 1; i <= this.MAX_PHOTOS; i++) {
+      if (Date.now() - T0 > DEADLINE_MS) {
+        this._log("⏱️ [WPOP] Timeout de fotos, sigo al siguiente paso.", "warning");
+        break;
+      }
+
+      const found = await this._buscarPrimeraQueExista(folder, i, exts);
+      if (!found) {
+        if (i === 1) {
+          this._log(
+            `ℹ️ [WPOP] Sin fotos en ${this.LOCAL_PHOTOS_BASE}/${folder}/`,
+            "info"
+          );
+        }
+        break;
+      }
+
+      let dataURL = await this._getDataURLFromLocal(found);
+      if (!dataURL) {
+        this._log(`⚠️ [WPOP] No pude leer: ${found}`, "warning");
+        continue;
+      }
+
+      const beforeKB = Math.round(this._dataURLBytes(dataURL) / 1024);
+      const MAX_BYTES = 600 * 1024;
+
+      if (this._dataURLBytes(dataURL) > MAX_BYTES) {
+        try {
+          dataURL = await this._shrinkToMaxBytes(dataURL, {
+            maxBytes: MAX_BYTES,
+            startQuality: 0.9,
+            minQuality: 0.55,
+            maxDim: 2000,
+            minDim: 600,
+            opTimeout: 7000,
+          });
+        } catch (e) {
+          this._log(
+            `⚠️ [WPOP] Compresión fallida para ${found}: ${e?.message || e}. Subo original.`,
+            "warning"
+          );
+        }
+      }
+
+      const afterKB = Math.round(this._dataURLBytes(dataURL) / 1024);
+      this._log(`🗜️ [WPOP] Foto ${i}: ${beforeKB}KB → ${afterKB}KB`, "info");
+
+      const blob = await this._dataURLToBlob(dataURL);
+      const extMatch = found.match(/\.[a-zA-Z0-9]+$/);
+      const ext = extMatch ? extMatch[0] : ".jpg";
+      const fileName = `${folder}_${i}${ext}`;
+
+      const file = new File([blob], fileName, {
+        type: blob.type || "image/jpeg",
+      });
+
+      dt.items.add(file);
+      uploaded++;
+      this._log(`📸 [WPOP] Preparada foto ${i}: ${fileName}`, "success");
+    }
+
+    if (uploaded === 0) {
+      this._log("ℹ️ [WPOP] No se añadió ninguna foto al input. Sigo flujo.", "info");
+      return true;
+    }
+
+    input.files = dt.files;
+    const ev = new Event("change", { bubbles: true, cancelable: true });
+    input.dispatchEvent(ev);
+
+    this._log(`✅ [WPOP] ${uploaded} foto(s) añadidas al formulario.`, "success");
+    return true;
+  }
+
+  // ========================
+  // PASO 4: click en "Subir producto"
+  // ========================
+  async _clickSubmit() {
+    const findSubmitButton = () => {
+      const hosts = Array.from(
+        document.querySelectorAll('walla-button[data-testid="continue-action-button"]')
+      );
+      for (const h of hosts) {
+        const btn = h.shadowRoot?.querySelector("button");
+        if (!btn) continue;
+        const t = (btn.textContent || "").trim().toLowerCase();
+        if (t.includes("subir producto") || t.includes("publicar")) {
+          return btn;
+        }
+      }
+
+      const allWalla = Array.from(document.querySelectorAll("walla-button"));
+      for (const h of allWalla) {
+        const btn = h.shadowRoot?.querySelector("button");
+        if (!btn) continue;
+        const t = (btn.textContent || "").trim().toLowerCase();
+        if (t.includes("subir producto") || t.includes("publicar")) {
+          return btn;
+        }
+      }
+
+      const plain = Array.from(
+        document.querySelectorAll("button.walla-button__button")
+      );
+      const found = plain.find((b) => {
+        const t = (b.textContent || "").trim().toLowerCase();
+        return t.includes("subir producto") || t.includes("publicar");
+      });
+      return found || null;
+    };
+
+    const btn = await this._waitForElement(findSubmitButton, 10000);
+    if (!btn) {
+      this._log(
+        "❌ No encuentro botón de 'Subir producto' en Wallapop",
+        "error"
+      );
+      return false;
+    }
+
+    this._log("🚀 Click en botón 'Subir producto' (Wallapop)", "info");
+    this._forceClick(btn);
+    await this._wait(1000);
+    return true;
+  }
+
+  // ========================
+  // Helpers DOM / dropdown ARIA
+  // ========================
+  async _selectDropdownByAria(dropdownLabel, optionLabel) {
+    const trigger = document.querySelector(
+      `.walla-dropdown__inner-input[role="button"][aria-label="${dropdownLabel}"]`
+    );
+
+    if (!trigger) {
+      this._log(`❌ No encuentro el dropdown "${dropdownLabel}"`, "error");
+      return false;
+    }
+
+    trigger.scrollIntoView({ block: "center", behavior: "instant" });
+    trigger.click();
+
+    await new Promise(res => setTimeout(res, 400));
+
+    const options = Array.from(
+      document.querySelectorAll('walla-dropdown-item[aria-label]')
+    );
+    const option = options.find(
+      el => el.getAttribute('aria-label') === optionLabel
+    );
+
+    if (!option) {
+      this._log(
+        `❌ No encuentro la opción "${optionLabel}" dentro de "${dropdownLabel}"`,
+        "error"
+      );
+      return false;
+    }
+
+    option.scrollIntoView({ block: "center", behavior: "instant" });
+    option.click();
+
+    await new Promise(res => setTimeout(res, 200));
+
+    this._log(`✅ ${dropdownLabel}: seleccionado "${optionLabel}"`, "info");
+    return true;
+  }
+
+  // ========================
+  // Helpers genéricos (tiempo, visibilidad, etc.)
+  // ========================
+  _delay(ms) {
+    return new Promise((r) => setTimeout(r, ms));
+  }
+  _wait(ms) {
+    return new Promise((r) => setTimeout(r, ms));
+  }
+
+  async _waitForUrl(regex, timeout = 8000) {
+    const t0 = Date.now();
+    while (Date.now() - t0 < timeout) {
+      if (regex.test(location.pathname + location.search + location.hash))
+        return true;
+      await this._wait(150);
+    }
+    return false;
+  }
+
+  _isVisible(el) {
+    if (!el) return false;
+    const r = el.getBoundingClientRect();
+    const st = getComputedStyle(el);
+    return (
+      r.width > 0 &&
+      r.height > 0 &&
+      st.display !== "none" &&
+      st.visibility !== "hidden" &&
+      st.opacity !== "0"
+    );
+  }
+  _isEnabled(el) {
+    if (!el) return false;
+    const dis =
+      el.disabled ||
+      el.getAttribute("disabled") !== null ||
+      el.getAttribute("aria-disabled") === "true";
+    const cl = (el.className || "").toString();
+    return !dis && !/disabled|is\-disabled/i.test(cl);
+  }
+  _forceClick(el) {
+    try {
+      el.scrollIntoView({ behavior: "smooth", block: "center" });
+      el.click();
+      el.dispatchEvent(
+        new MouseEvent("click", { bubbles: true, cancelable: true, view: window })
+      );
+    } catch {}
+  }
+
+  async _clickShadowButton(wallaButtonEl) {
+    const tryOnce = () => {
+      const btn = wallaButtonEl.shadowRoot?.querySelector("button");
+      if (!btn) return false;
+      if (!this._isVisible(btn) || !this._isEnabled(btn)) return false;
+      this._forceClick(btn);
+      return true;
+    };
+
+    if (tryOnce()) return true;
+    if (!wallaButtonEl.shadowRoot) return false;
+
+    return await new Promise((resolve) => {
+      const obs = new MutationObserver(() => {
+        if (tryOnce()) {
+          obs.disconnect();
+          resolve(true);
+        }
+      });
+      obs.observe(wallaButtonEl.shadowRoot, {
+        childList: true,
+        subtree: true,
+      });
+      setTimeout(() => {
+        obs.disconnect();
+        resolve(false);
+      }, 8000);
+    });
+  }
+
+  async _waitForElement(getterFn, timeout = 8000) {
+    const t0 = Date.now();
+    while (Date.now() - t0 < timeout) {
+      const el = getterFn();
+      if (el && this._isVisible(el)) return el;
+      await this._wait(200);
+    }
+    return null;
+  }
+
+  // ========================
+  // Helpers de imágenes (reusando patrón de Autoline)
+  // ========================
+  _sendMessageWithTimeout(payload, { timeout = 2000 } = {}) {
+    return new Promise((resolve) => {
+      let done = false;
+      const t = setTimeout(() => {
+        if (!done) {
+          done = true;
+          resolve(null);
+        }
+      }, timeout);
+      try {
+        chrome.runtime.sendMessage(payload, (resp) => {
+          if (done) return;
+          done = true;
+          clearTimeout(t);
+          resolve(resp || null);
+        });
+      } catch {
+        if (!done) {
+          done = true;
+          clearTimeout(t);
+          resolve(null);
+        }
+      }
+    });
+  }
+
+  async _buscarPrimeraQueExista(folder, idx, exts) {
+    for (const ex of exts) {
+      const url = `${this.LOCAL_PHOTOS_BASE}/${encodeURIComponent(folder)}/${idx}${ex}`;
+      const probe = await this._sendMessageWithTimeout(
+        { type: "FETCH_LOCAL_IMAGE", url },
+        { timeout: 2000 }
+      );
+      if (probe && probe.ok) return url;
+    }
+    return null;
+  }
+
+  async _getDataURLFromLocal(url) {
+    const r = await this._sendMessageWithTimeout(
+      { type: "FETCH_LOCAL_IMAGE", url },
+      { timeout: 4000 }
+    );
+    return r && r.ok && r.dataURL ? r.dataURL : null;
+  }
+
+  _dataURLBytes(dataURL) {
+    const b64 = dataURL.split(",")[1] || "";
+    const pad = (b64.match(/=+$/) || [""])[0].length;
+    return Math.floor((b64.length * 3) / 4) - pad;
+  }
+
+  async _dataURLToBlob(dataURL) {
+    const res = await fetch(dataURL);
+    return await res.blob();
+  }
+
+  _timeout(ms) {
+    return new Promise((_, rej) => setTimeout(() => rej(new Error("timeout")), ms));
+  }
+
+  _blobToDataURL(blob) {
+    return new Promise((res, rej) => {
+      const fr = new FileReader();
+      fr.onload = () => res(fr.result);
+      fr.onerror = () => rej(fr.error || new Error("FileReader error"));
+      fr.readAsDataURL(blob);
+    });
+  }
+
+  async _decodeImageSafe(dataURL, { timeout = 5000 } = {}) {
+    try {
+      const mimeMatch = /^data:(image\/[^;]+);base64,/i.exec(dataURL);
+      const mime = mimeMatch ? mimeMatch[1] : "image/jpeg";
+      const b64 = dataURL.split(",")[1] || "";
+      const bin = Uint8Array.from(atob(b64), (c) => c.charCodeAt(0));
+      const blob = new Blob([bin], { type: mime });
+      const bmp = await Promise.race([createImageBitmap(blob), this._timeout(timeout)]);
+      const canvas = document.createElement("canvas");
+      canvas.width = bmp.width;
+      canvas.height = bmp.height;
+      const ctx = canvas.getContext("2d", { alpha: false });
+      ctx.drawImage(bmp, 0, 0);
+      bmp.close?.();
+      return { canvas, width: canvas.width, height: canvas.height };
+    } catch {}
+
+    const img = new Image();
+    img.decoding = "async";
+    img.src = dataURL;
+    await Promise.race([
+      new Promise((res, rej) => {
+        img.onload = () => res();
+        img.onerror = () => rej(new Error("img onerror"));
+      }),
+      this._timeout(timeout),
+    ]);
+    const canvas = document.createElement("canvas");
+    canvas.width = img.naturalWidth || img.width;
+    canvas.height = img.naturalHeight || img.height;
+    const ctx = canvas.getContext("2d", { alpha: false });
+    ctx.drawImage(img, 0, 0);
+    return { canvas, width: canvas.width, height: canvas.height };
+  }
+
+  async _shrinkToMaxBytes(
+    dataURL,
+    { maxBytes = 50 * 1024, startQuality = 0.82, minQuality = 0.5, maxDim = 1600, minDim = 480, stepDim = 0.88, opTimeout = 7000 } = {}
+  ) {
+    try {
+      const tStart = Date.now();
+      if (!/^data:image\/(jpeg|jpg|png|webp)/i.test(dataURL)) return dataURL;
+      if (this._dataURLBytes(dataURL) <= maxBytes) return dataURL;
+
+      const { canvas, width: W0, height: H0 } = await this._decodeImageSafe(dataURL, { timeout: 4000 });
+      let w = W0, h = H0;
+      const scale0 = Math.min(1, maxDim / Math.max(w, h));
+      if (scale0 < 1) {
+        w = Math.max(minDim, Math.round(w * scale0));
+        h = Math.max(minDim, Math.round(h * scale0));
+      }
+
+      const work = document.createElement("canvas");
+      const ctx = work.getContext("2d", { alpha: false });
+      const draw = () => {
+        work.width = w;
+        work.height = h;
+        ctx.clearRect(0, 0, w, h);
+        ctx.drawImage(canvas, 0, 0, w, h);
+      };
+      draw();
+
+      let best = dataURL;
+      let quality = startQuality;
+
+      const toDataURLQ = (q) =>
+        new Promise((res, rej) => {
+          work.toBlob(
+            async (blob) => {
+              if (!blob) return rej(new Error("toBlob null"));
+              const out = await this._blobToDataURL(blob);
+              res(out);
+            },
+            "image/jpeg",
+            q
+          );
+        });
+
+      for (; quality >= minQuality; quality -= 0.08) {
+        if (Date.now() - tStart > opTimeout) break;
+        const out = await toDataURLQ(quality);
+        best = out;
+        if (this._dataURLBytes(out) <= maxBytes) return out;
+      }
+
+      for (let tries = 0; tries < 10; tries++) {
+        if (Date.now() - tStart > opTimeout) break;
+
+        const nw = Math.max(minDim, Math.round(w * stepDim));
+        const nh = Math.max(minDim, Math.round(h * stepDim));
+        if (nw === w && nh === h) break;
+        w = nw;
+        h = nh;
+        draw();
+
+        let q = Math.max(minQuality, 0.6);
+        for (; q >= minQuality; q -= 0.08) {
+          if (Date.now() - tStart > opTimeout) break;
+          const out = await toDataURLQ(q);
+          best = out;
+          if (this._dataURLBytes(out) <= maxBytes) return out;
+        }
+      }
+      return best;
+    } catch {
+      return dataURL;
+    }
+  }
+}
 
   // =========================
-  // Router multi-sitio (Autoline / Europa-Camiones / Via-Mobilis)
+  // Router multi-sitio (Autoline / Europa-Camiones / Via-Mobilis / Coches.net / Wallapop)
   // =========================
   (() => {
     const host = location.host;
 
     const SITE_MAP = [
-  {
-    test: (h) => /autoline\.es$/i.test(h),
-    key: "autoline",
-    init: () => new AutolineAutomation(),
-  },
-  {
-    test: (h) =>
-      /europa-camiones\.com$/i.test(h) ||
-      /(^|\.)via-mobilis\.com$/i.test(h),
-    key: "europacamiones",
-    init: () => new EuropacamionesAutomation(),
-  },
-  {
-  key: "cochesnet",
-  test: (h) => /(^|\.)pro\.coches\.net/i.test(h),
-  init: () => {
-    if (typeof CochesNetAutomation === "function") {
-      return new CochesNetAutomation();
-    }
+      {
+        test: (h) => /autoline\.es$/i.test(h),
+        key: "autoline",
+        init: () => new AutolineAutomation(),
+      },
+      {
+        test: (h) =>
+          /europa-camiones\.com$/i.test(h) ||
+          /(^|\.)via-mobilis\.com$/i.test(h),
+        key: "europacamiones",
+        init: () => new EuropacamionesAutomation(),
+      },
+      {
+        key: "cochesnet",
+        test: (h) => /(^|\.)pro\.coches\.net$/i.test(h) || /(^|\.)coches\.net$/i.test(h),
+        init: () => {
+          if (typeof CochesNetAutomation === "function") {
+            return new CochesNetAutomation();
+          }
 
-    console.warn(
-      "[TruckExtension] CochesNetAutomation no definido en esta página, se desactiva coches.net aquí."
-    );
-    return null;
-  },
-},
-,
-];
+          console.warn(
+            "[TruckExtension] CochesNetAutomation no definido en esta página, se desactiva coches.net aquí."
+          );
+          return null;
+        },
+      },
+      {
+        key: "wallapop",
+        test: (h) => /(^|\.)wallapop\.com$/i.test(h),
+        init: () => {
+          if (typeof WallapopAutomation === "function") {
+            return new WallapopAutomation();
+          }
 
+          console.warn(
+            "[TruckExtension] WallapopAutomation no definido en esta página, se desactiva wallapop.com aquí."
+          );
+          return null;
+        },
+      },
+    ];
 
     if (!window.__siteAutomation__) {
       const site = SITE_MAP.find((s) => s.test(host));
@@ -3725,3 +4902,4 @@ class CochesNetAutomation {
     }
   })();
 })(); // cierre IIFE raíz
+

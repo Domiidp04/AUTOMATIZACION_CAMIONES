@@ -565,20 +565,22 @@ function toggleAutomationPanel() {
     chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
       const url = tabs[0]?.url || "";
 
-      const site =
-        url.includes("autoline.es") ? "autoline.es" :
-        /europa-camiones\./i.test(url) ? "europa-camiones.com" :
-        /(^|\.)via-mobilis\.com/i.test(url) ? "my.via-mobilis.com" :
-        /(^|\.)beta\.pro\.coches\.net/i.test(url) ? "beta.pro.coches.net" :
-        /(^|\.)pro\.coches\.net/i.test(url) ? "pro.coches.net" :
-        /(^|\.)coches\.net/i.test(url) ? "coches.net" :
-        null;
+const site =
+  url.includes("autoline.es") ? "autoline.es" :
+  /europa-camiones\./i.test(url) ? "europa-camiones.com" :
+  /(^|\.)via-mobilis\.com/i.test(url) ? "my.via-mobilis.com" :
+  /(^|\.)beta\.pro\.coches\.net/i.test(url) ? "beta.pro.coches.net" :
+  /(^|\.)pro\.coches\.net/i.test(url) ? "pro.coches.net" :
+  /(^|\.)coches\.net/i.test(url) ? "coches.net" :
+  /(^|\.)es\.wallapop\.com/i.test(url) ? "es.wallapop.com" :
+  /(^|\.)wallapop\.com/i.test(url) ? "wallapop.com" :
+  null;
 
       if (site)
         addLog(`✅ Detectado ${site} - Listo para automatizar`, "success");
       else
         addLog(
-          "⚠️ Debes estar en Autoline, Europa-Camiones o Coches.net para usar la automatización",
+          "⚠️ Debes estar en Autoline, Europa-Camiones, Coches.net o Wallapop para usar la automatización",
           "info"
         );
     });
@@ -661,9 +663,10 @@ const allowed =
   url.includes("autoline.es") ||
   /europa-camiones\./i.test(url) ||
   /via-mobilis\.com/i.test(url) ||
-  /pro\.coches\.net/i.test(url); // beta.pro.coches.net y pro.coches.net
+  /pro\.coches\.net/i.test(url) ||   // beta.pro.coches.net y pro.coches.net
+  /wallapop\.com/i.test(url);        // wallapop.com y es.wallapop.com
     if (!allowed) {
-      addLog("❌ Debes estar en autoline.es o europacamiones", "error");
+      addLog("❌ Debes estar en autoline.es, europacamiones, Coches.net o Wallapop", "error");
       updateStatus("Error: No estás en un sitio compatible", "error");
       stopQueueProcessing();
       return;
