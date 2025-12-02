@@ -286,6 +286,13 @@ function setupEventListeners() {
     .getElementById("loop")
     ?.addEventListener("click", toggleAutomationPanel);
 
+  document.getElementById("milanuncios")?.addEventListener("click", function () {
+    window.open(
+      `${ruta}/truck/html/FormEdit.html`,
+      "_blank"
+    );
+  });
+
   document.addEventListener("click", function (e) {
     if (e.target && e.target.id === "clear-selection") clearAllSelections();
   });
@@ -421,20 +428,21 @@ function showselect() {
       if (!vehicleList) return;
       vehicleList.innerHTML = "";
 
-      // Seleccionar todos
-      const selectAllContainer = document.createElement("div");
-      selectAllContainer.className = "select-all-container";
+      // ====== Fila "Seleccionar todos" ======
+      const selectAllRow = document.createElement("label");
+      selectAllRow.className = "select-all-container";
+
       const selectAllCheckbox = document.createElement("input");
       selectAllCheckbox.type = "checkbox";
       selectAllCheckbox.id = "select-all";
       selectAllCheckbox.className = "vehicle-checkbox";
-      const selectAllLabel = document.createElement("label");
-      selectAllLabel.textContent = "Seleccionar todos";
-      selectAllLabel.style.marginLeft = "5px";
-      selectAllLabel.style.cursor = "pointer";
-      selectAllContainer.appendChild(selectAllCheckbox);
-      selectAllContainer.appendChild(selectAllLabel);
-      vehicleList.appendChild(selectAllContainer);
+
+      const selectAllText = document.createElement("span");
+      selectAllText.textContent = "Seleccionar todos";
+
+      selectAllRow.appendChild(selectAllCheckbox);
+      selectAllRow.appendChild(selectAllText);
+      vehicleList.appendChild(selectAllRow);
 
       selectAllCheckbox.addEventListener("change", function () {
         const checkboxes = vehicleList.querySelectorAll(
@@ -450,26 +458,23 @@ function showselect() {
         updateSelectionInfo();
       });
 
-      // Items
+      // ====== Fila por cada vehículo ======
       vehicles.forEach((obj) => {
-        const item = document.createElement("div");
-        item.className = "vehicle-item";
+        const row = document.createElement("label");
+        row.className = "vehicle-item";
 
         const cb = document.createElement("input");
         cb.type = "checkbox";
         cb.className = "vehicle-checkbox";
         cb.value = obj.codigo;
-        cb.id = `vehicle-${obj.codigo}`;
 
-        const label = document.createElement("label");
-        label.textContent = obj.codigo;
-        label.className = "vehicle-code";
-        label.htmlFor = cb.id;
-        label.style.cursor = "pointer";
+        const codeSpan = document.createElement("span");
+        codeSpan.className = "vehicle-code";
+        codeSpan.textContent = obj.codigo;
 
-        item.appendChild(cb);
-        item.appendChild(label);
-        vehicleList.appendChild(item);
+        row.appendChild(cb);
+        row.appendChild(codeSpan);
+        vehicleList.appendChild(row);
 
         cb.addEventListener("change", function () {
           if (this.checked) {
@@ -479,6 +484,7 @@ function showselect() {
             selectedVehicles = selectedVehicles.filter((v) => v !== this.value);
             selectAllCheckbox.checked = false;
           }
+
           const allCb = vehicleList.querySelectorAll(
             ".vehicle-checkbox:not(#select-all)"
           );
@@ -488,10 +494,6 @@ function showselect() {
           selectAllCheckbox.checked =
             allCb.length === checkedCb.length && checkedCb.length > 0;
           updateSelectionInfo();
-        });
-
-        item.addEventListener("click", (e) => {
-          if (e.target !== cb) cb.click();
         });
       });
 
@@ -509,6 +511,7 @@ function showselect() {
       if (selectionInfo) selectionInfo.style.display = "none";
     });
 }
+
 
 // ===============================
 // 🗑️ Borrado de vehículos
@@ -807,9 +810,16 @@ function hideQueueStatus() {
 
 function toggleButtons(isRunning) {
   const start = document.getElementById("start-btn");
-  const stop = document.getElementById("stop-btn");
-  if (start) start.style.display = isRunning ? "none" : "block";
-  if (stop) stop.style.display = isRunning ? "block" : "none";
+  const stop  = document.getElementById("stop-btn");
+  if (!start || !stop) return;
+
+  if (isRunning) {
+    start.classList.add("hidden");
+    stop.classList.remove("hidden");
+  } else {
+    start.classList.remove("hidden");
+    stop.classList.add("hidden");
+  }
 }
 
 function showProgress() {
