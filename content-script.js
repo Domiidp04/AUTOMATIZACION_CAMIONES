@@ -378,7 +378,7 @@ class AutolineAutomation {
           ok = await this._subirFotosAutolineFromLocal();
           break;
         case "siguiente":
-          ok = await this._clickSiguiente();
+          ok = await this._clickGuardar();
           break;
         case "aplazar":
           ok = await this._clickAplazar();
@@ -1004,34 +1004,45 @@ async _seleccionarCategoriaAutoline() {
     return true;
   }
 
-  async _clickSiguiente() {
-    const specific = document.querySelector(".next-button button, .next-button > button");
-    if (specific && this._isVisible(specific) && _txt(specific).includes("siguiente")) {
-      this._smoothClick(specific);
-      return true;
-    }
-    const wrapper = document.querySelector(".next-button");
-    if (wrapper) {
-      const btnInWrapper = wrapper.querySelector('button, [role="button"], input[type="button"], input[type="submit"]');
-      if (btnInWrapper && this._isVisible(btnInWrapper) && /siguiente|continuar|next/i.test(_txt(btnInWrapper))) {
-        this._smoothClick(btnInWrapper);
-        return true;
-      }
-    }
-    const candidates = Array.from(document.querySelectorAll('button, [role="button"], input[type="button"], input[type="submit"]'));
-    const byText = candidates.find((b) => this._isVisible(b) && /siguiente|continuar|next/i.test(_txt(b)));
-    if (byText) {
-      this._smoothClick(byText);
-      return true;
-    }
-
-    if (wrapper && this._isVisible(wrapper)) {
-      this._smoothClick(wrapper);
-      return true;
-    }
-    this._log('❌ No se encontró el botón "Siguiente"', "error");
-    return false;
+async _clickGuardar() {
+  // 1) Botón específico dentro de .next-button (por si reutilizas la misma clase contenedora)
+  const specific = document.querySelector(".next-button button, .next-button > button");
+  if (specific && this._isVisible(specific) && /guardar|save/i.test(_txt(specific))) {
+    this._smoothClick(specific);
+    return true;
   }
+
+  // 2) Cualquier botón dentro de .next-button que tenga texto tipo Guardar / Save
+  const wrapper = document.querySelector(".next-button");
+  if (wrapper) {
+    const btnInWrapper = wrapper.querySelector('button, [role="button"], input[type="button"], input[type="submit"]');
+    if (btnInWrapper && this._isVisible(btnInWrapper) && /guardar|save/i.test(_txt(btnInWrapper))) {
+      this._smoothClick(btnInWrapper);
+      return true;
+    }
+  }
+
+  // 3) Buscar en todos los botones visibles por texto Guardar / Save
+  const candidates = Array.from(
+    document.querySelectorAll('button, [role="button"], input[type="button"], input[type="submit"]')
+  );
+  const byText = candidates.find(
+    (b) => this._isVisible(b) && /guardar|save/i.test(_txt(b))
+  );
+  if (byText) {
+    this._smoothClick(byText);
+    return true;
+  }
+
+  // 4) Último recurso: click al wrapper si es clicable y visible
+  if (wrapper && this._isVisible(wrapper)) {
+    this._smoothClick(wrapper);
+    return true;
+  }
+
+  this._log('❌ No se encontró el botón "Guardar"', "error");
+  return false;
+}
 
   async _clickAplazar() {
     const suspendLink = document.querySelector(".actions a.suspend");
@@ -3941,7 +3952,6 @@ async _onNavigationChange(oldUrl, newUrl) {
   // 🔹 Caso especial: tras publicar, Wallapop redirige a /app/pro/catalog/list;created=true;itemId=...
   const isCreated =
     newUrl.includes("/app/pro/catalog/list") &&
-    newUrl.includes("created=true") &&
     newUrl.includes("itemId=");
 
   if (isCreated) {
@@ -4485,7 +4495,7 @@ async _executeStep() {
     await this._selectDropdownByAria("Motor", "Diésel");
 
     // Cambio según v.CAJA_CAMBIO
-    const cambioOpcion = v.CAJA_CAMBIO === "1" ? "Automático" : "Manual";
+    const cambioOpcion = v.caja_cambio == "1" ? "Automático" : "Manual";
     await this._selectDropdownByAria("Cambio", cambioOpcion);
 
     // Tipo de coche
@@ -4760,7 +4770,7 @@ async _executeStep() {
     );
 
     const redirected = await this._waitForUrl(
-      /\/app\/pro\/catalog\/list.*created=true.*itemId=/,
+      /\/app\/pro\/catalog\/list.*.*itemId=/,
       this.SUBMIT_REDIRECT_TIMEOUT_MS
     );
 
