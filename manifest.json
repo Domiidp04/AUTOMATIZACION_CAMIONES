@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
-  "name": "Truck Manager (WALLAPOP)",
+  "name": "Truck Manager (TODO)",
   "description": "Automatización para Autoline.es, europa-camiones.com, coches.net y wallapop.com",
-  "version": "3.0.0",
+  "version": "1.0.0",
 
   "action": { "default_popup": "popup.html" },
 
