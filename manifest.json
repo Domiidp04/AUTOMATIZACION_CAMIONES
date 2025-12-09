@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
-  "name": "Truck Manager (Autoline + Europa-Camiones)",
-  "description": "Automatización para Autoline.es y europa-camiones.com.",
-  "version": "5.1.0",
+  "name": "Truck Manager (TODO)",
+  "description": "Automatización para Autoline.es, europa-camiones.com, coches.net y wallapop.com",
+  "version": "1.0.0",
 
   "action": { "default_popup": "popup.html" },
 
@@ -15,6 +15,10 @@
     "*://europa-camiones.com/*",
     "*://*.via-mobilis.com/*",
     "*://via-mobilis.com/*",
+    "*://*.coches.net/*",
+    "*://coches.net/*",
+    "*://*.wallapop.com/*",
+    "*://wallapop.com/*",
     "https://truckocasion.com/*",
     "http://127.0.0.1/*",
     "http://localhost/*"
@@ -38,7 +42,11 @@
         "*://*.europa-camiones.com/*",
         "*://europa-camiones.com/*",
         "*://*.via-mobilis.com/*",
-        "*://via-mobilis.com/*"
+        "*://via-mobilis.com/*",
+        "*://*.coches.net/*",
+        "*://coches.net/*",
+        "*://*.wallapop.com/*",
+        "*://wallapop.com/*"
       ],
       "js": ["content-script.js"],
       "run_at": "document_end"

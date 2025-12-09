@@ -48,15 +48,15 @@ const BRANDS = {
     carrocerias: [
       "todos",
       "TRACTO",
-      "TAUTLINER",
+      "TAUTLIN",
       "FURGONES",
       "GRUA",
       "GANCHO",
       "ISOTERMO",
       "FRIGO",
-      "BASCULANT",
+      "BASCUL",
       "PORTAMAQ",
-      "GANCHO+GRUA",
+      "GANYGRUA",
       "FURGONET",
       "SEMI-REM",
       "TURISMO",
@@ -71,20 +71,20 @@ const BRANDS = {
     "FRIGO",
     "GRUA",
     "GANCHO",
-    "SEMI-TAUTLINER",
-    "PORTAMAQUINARIA",
+    "SEMITAUT",
+    "PORTAMAQ",
     "FURGON",
-    "BASCULANTE",
-    "TAUTLINE",
+    "BASCUL",
+    "TAUTLIN",
     "GANADERO",
     "CHASIS",
     "HORMIGON",
-    "GANCHO+GRUA",
+    "GANYGRUA",
     "TRACTO",
-    "CAJA ABIERTA",
-    "CARRILLEROS",
+    "CAJA",
+    "CARRI",
     "CISTERNA",
-    "TWISTLOCK"
+    "TWIST"
   ],
 },
 
@@ -286,6 +286,13 @@ function setupEventListeners() {
     .getElementById("loop")
     ?.addEventListener("click", toggleAutomationPanel);
 
+  document.getElementById("milanuncios")?.addEventListener("click", function () {
+    window.open(
+      `${ruta}/truck/html/FormEdit.html`,
+      "_blank"
+    );
+  });
+
   document.addEventListener("click", function (e) {
     if (e.target && e.target.id === "clear-selection") clearAllSelections();
   });
@@ -421,20 +428,21 @@ function showselect() {
       if (!vehicleList) return;
       vehicleList.innerHTML = "";
 
-      // Seleccionar todos
-      const selectAllContainer = document.createElement("div");
-      selectAllContainer.className = "select-all-container";
+      // ====== Fila "Seleccionar todos" ======
+      const selectAllRow = document.createElement("label");
+      selectAllRow.className = "select-all-container";
+
       const selectAllCheckbox = document.createElement("input");
       selectAllCheckbox.type = "checkbox";
       selectAllCheckbox.id = "select-all";
       selectAllCheckbox.className = "vehicle-checkbox";
-      const selectAllLabel = document.createElement("label");
-      selectAllLabel.textContent = "Seleccionar todos";
-      selectAllLabel.style.marginLeft = "5px";
-      selectAllLabel.style.cursor = "pointer";
-      selectAllContainer.appendChild(selectAllCheckbox);
-      selectAllContainer.appendChild(selectAllLabel);
-      vehicleList.appendChild(selectAllContainer);
+
+      const selectAllText = document.createElement("span");
+      selectAllText.textContent = "Seleccionar todos";
+
+      selectAllRow.appendChild(selectAllCheckbox);
+      selectAllRow.appendChild(selectAllText);
+      vehicleList.appendChild(selectAllRow);
 
       selectAllCheckbox.addEventListener("change", function () {
         const checkboxes = vehicleList.querySelectorAll(
@@ -450,26 +458,23 @@ function showselect() {
         updateSelectionInfo();
       });
 
-      // Items
+      // ====== Fila por cada vehículo ======
       vehicles.forEach((obj) => {
-        const item = document.createElement("div");
-        item.className = "vehicle-item";
+        const row = document.createElement("label");
+        row.className = "vehicle-item";
 
         const cb = document.createElement("input");
         cb.type = "checkbox";
         cb.className = "vehicle-checkbox";
         cb.value = obj.codigo;
-        cb.id = `vehicle-${obj.codigo}`;
 
-        const label = document.createElement("label");
-        label.textContent = obj.codigo;
-        label.className = "vehicle-code";
-        label.htmlFor = cb.id;
-        label.style.cursor = "pointer";
+        const codeSpan = document.createElement("span");
+        codeSpan.className = "vehicle-code";
+        codeSpan.textContent = obj.codigo;
 
-        item.appendChild(cb);
-        item.appendChild(label);
-        vehicleList.appendChild(item);
+        row.appendChild(cb);
+        row.appendChild(codeSpan);
+        vehicleList.appendChild(row);
 
         cb.addEventListener("change", function () {
           if (this.checked) {
@@ -479,6 +484,7 @@ function showselect() {
             selectedVehicles = selectedVehicles.filter((v) => v !== this.value);
             selectAllCheckbox.checked = false;
           }
+
           const allCb = vehicleList.querySelectorAll(
             ".vehicle-checkbox:not(#select-all)"
           );
@@ -488,10 +494,6 @@ function showselect() {
           selectAllCheckbox.checked =
             allCb.length === checkedCb.length && checkedCb.length > 0;
           updateSelectionInfo();
-        });
-
-        item.addEventListener("click", (e) => {
-          if (e.target !== cb) cb.click();
         });
       });
 
@@ -509,6 +511,7 @@ function showselect() {
       if (selectionInfo) selectionInfo.style.display = "none";
     });
 }
+
 
 // ===============================
 // 🗑️ Borrado de vehículos
@@ -564,18 +567,23 @@ function toggleAutomationPanel() {
   if (visible) {
     chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
       const url = tabs[0]?.url || "";
-      const site =
+
+const site =
   url.includes("autoline.es") ? "autoline.es" :
   /europa-camiones\./i.test(url) ? "europa-camiones.com" :
   /(^|\.)via-mobilis\.com/i.test(url) ? "my.via-mobilis.com" :
+  /(^|\.)beta\.pro\.coches\.net/i.test(url) ? "beta.pro.coches.net" :
+  /(^|\.)pro\.coches\.net/i.test(url) ? "pro.coches.net" :
+  /(^|\.)coches\.net/i.test(url) ? "coches.net" :
+  /(^|\.)es\.wallapop\.com/i.test(url) ? "es.wallapop.com" :
+  /(^|\.)wallapop\.com/i.test(url) ? "wallapop.com" :
   null;
-
 
       if (site)
         addLog(`✅ Detectado ${site} - Listo para automatizar`, "success");
       else
         addLog(
-          "⚠️ Ve a autoline.es o europacamiones para usar la automatización",
+          "⚠️ Debes estar en Autoline, Europa-Camiones, Coches.net o Wallapop para usar la automatización",
           "info"
         );
     });
@@ -654,13 +662,14 @@ function processNextVehicle() {
 
     const [activeTab] = await chrome.tabs.query({ active: true, currentWindow: true });
     const url = activeTab?.url || "";
-    const allowed = (
-      url.includes("autoline.es") ||
-      /europa-camiones\./i.test(url) ||
-      /(^|\.)via-mobilis\.com/i.test(url)
-    );
+const allowed =
+  url.includes("autoline.es") ||
+  /europa-camiones\./i.test(url) ||
+  /via-mobilis\.com/i.test(url) ||
+  /pro\.coches\.net/i.test(url) ||   // beta.pro.coches.net y pro.coches.net
+  /wallapop\.com/i.test(url);        // wallapop.com y es.wallapop.com
     if (!allowed) {
-      addLog("❌ Debes estar en autoline.es o europacamiones", "error");
+      addLog("❌ Debes estar en autoline.es, europacamiones, Coches.net o Wallapop", "error");
       updateStatus("Error: No estás en un sitio compatible", "error");
       stopQueueProcessing();
       return;
@@ -801,9 +810,16 @@ function hideQueueStatus() {
 
 function toggleButtons(isRunning) {
   const start = document.getElementById("start-btn");
-  const stop = document.getElementById("stop-btn");
-  if (start) start.style.display = isRunning ? "none" : "block";
-  if (stop) stop.style.display = isRunning ? "block" : "none";
+  const stop  = document.getElementById("stop-btn");
+  if (!start || !stop) return;
+
+  if (isRunning) {
+    start.classList.add("hidden");
+    stop.classList.remove("hidden");
+  } else {
+    start.classList.remove("hidden");
+    stop.classList.add("hidden");
+  }
 }
 
 function showProgress() {

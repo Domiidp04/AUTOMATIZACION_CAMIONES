@@ -1,272 +1,145 @@
-<!doctype html>
+<!DOCTYPE html>
 <html>
-<head>
-    <meta charset="utf-8">
+  <head>
+    <meta charset="utf-8" />
     <title>Truck Manager</title>
-    <style>
-        body { 
-            width: 300px; 
-            padding: 15px; 
-            font-family: Arial, sans-serif; 
-            background: #f5f5f5;
-        }
-        .container { 
-            background: white; 
-            padding: 15px; 
-            border-radius: 8px; 
-            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
-        }
-        h1 { 
-            color: #333; 
-            margin: 0 0 15px 0; 
-            font-size: 18px;
-            text-align: center;
-        }
-        select, input { 
-            width: 100%; 
-            padding: 8px; 
-            margin: 5px 0; 
-            border: 1px solid #ddd; 
-            border-radius: 4px;
-            box-sizing: border-box;
-        }
-        label { 
-            font-weight: bold; 
-            color: #555; 
-            display: block;
-            margin-top: 10px;
-        }
-        .buttons { 
-            display: flex; 
-            gap: 5px; 
-            margin: 15px 0;
-        }
-        button { 
-            flex: 1; 
-            padding: 10px; 
-            border: none; 
-            border-radius: 4px; 
-            cursor: pointer;
-            font-size: 16px;
-        }
-        #loop { 
-            background: #007cba; 
-            color: white; 
-        }
-        #loop:hover { 
-            background: #005a87; 
-        }
-        #add { background: #28a745; color: white; }
-        #delete { background: #dc3545; color: white; }
-        #milanuncios { background: #ffc107; color: black; }
-        
-        .automation-panel {
-            background: #f8f9fa;
-            border: 1px solid #ddd;
-            border-radius: 6px;
-            padding: 15px;
-            margin-top: 15px;
-            display: none;
-        }
-        
-        .automation-panel h3 {
-            margin: 0 0 10px 0;
-            color: #333;
-            font-size: 14px;
-        }
-        
-        .status {
-            padding: 8px;
-            border-radius: 4px;
-            background: #e9ecef;
-            text-align: center;
-            margin: 10px 0;
-            font-size: 12px;
-        }
-        
-        .status.running { background: #fff3cd; }
-        .status.success { background: #d4edda; }
-        .status.error { background: #f8d7da; }
-        
-        .control-buttons {
-            display: flex;
-            gap: 5px;
-            margin: 10px 0;
-        }
-        
-        .control-buttons button {
-            font-size: 12px;
-            padding: 8px 12px;
-        }
-        
-        #start-btn { background: #007cba; color: white; }
-        #stop-btn { background: #dc3545; color: white; display: none; }
-        #reset-btn { background: #6c757d; color: white; }
-        
-        .log {
-            background: white;
-            border: 1px solid #ddd;
-            border-radius: 4px;
-            padding: 8px;
-            max-height: 120px;
-            overflow-y: auto;
-            font-size: 11px;
-            margin-top: 10px;
-        }
-        
-        .log-entry {
-            padding: 2px 0;
-            border-bottom: 1px solid #eee;
-        }
-        
-        .log-entry:last-child {
-            border-bottom: none;
-        }
-        
-        .progress {
-            background: #e9ecef;
-            border-radius: 4px;
-            height: 8px;
-            margin: 10px 0;
-            overflow: hidden;
-            display: none;
-        }
-        
-        .progress-bar {
-            background: #007cba;
-            height: 100%;
-            width: 0%;
-            transition: width 0.3s;
-        }
-        
-        /* Estilos para selección múltiple de vehículos */
-        .vehicle-item {
-            display: flex;
-            align-items: center;
-            padding: 6px;
-            border-bottom: 1px solid #eee;
-            cursor: pointer;
-            transition: background 0.2s;
-        }
-        
-        .vehicle-item:hover {
-            background: #f8f9fa;
-        }
-        
-        .vehicle-item:last-child {
-            border-bottom: none;
-        }
-        
-        .vehicle-checkbox {
-            margin-right: 8px;
-        }
-        
-        .vehicle-code {
-            flex: 1;
-            font-size: 13px;
-        }
-        
-        .select-all-container {
-            background: #f8f9fa;
-            border-bottom: 2px solid #ddd;
-            padding: 8px;
-            font-weight: bold;
-        }
-        
-        .queue-status {
-            background: #fff3cd;
-            border: 1px solid #ffeaa7;
-            border-radius: 4px;
-            padding: 8px;
-            margin: 10px 0;
-            font-size: 12px;
-            display: none;
-        }
-        
-        .queue-status.active {
-            display: block;
-        }
-        
-        .current-processing {
-            font-weight: bold;
-            color: #007cba;
-        }
-    </style>
-</head>
-<body>
+    <!-- Material Symbols Outlined -->
+    <link
+      href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@20..48,400,0,0"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="css/popup.css" />
+  </head>
+  <body>
     <div class="container">
-        <h1>🚛 Truck Manager</h1>
-        
-        <label for="cliente">Cliente:</label>
-        <select id="cliente">
-            <option value="200">Yourtruck</option>
-            <option value="300" selected>Salgartrucks</option>
-            <option value="400">Lascolinas</option>
-        </select>
-        
-        <label for="carroceria">Carrocería:</label>
-        <select id="carroceria">
-            <option value="">-- Seleccionar --</option>
-            <option value="todos">Todos</option>
-            <option value="TRACTO">Tractoras</option>
-            <option value="FURGON">Furgones</option>
-            <option value="GANCHO">Ganchos</option>
-            <option value="LONAS">Lonas</option>
-            <option value="VOLQUETE">Volquetes</option>
-            <option value="FRIGO">Frigorífico</option>
-        </select>
-        
-        <label for="marque">Vehículos:</label>
-        <div id="vehicle-container">
-            <div id="vehicle-list" style="max-height: 150px; overflow-y: auto; border: 1px solid #ddd; border-radius: 4px; padding: 8px; background: white; display: none;">
-                <!-- Los vehículos se cargarán aquí como checkboxes -->
-            </div>
-            <div id="vehicle-placeholder" style="padding: 8px; border: 1px solid #ddd; border-radius: 4px; background: #f8f9fa; color: #6c757d;">
-                -- Selecciona carrocería primero --
-            </div>
+      <h1>🚛 Truck Manager</h1>
+
+      <label for="cliente">Cliente:</label>
+      <select id="cliente">
+        <option value="200">Yourtruck</option>
+        <option value="300" selected>Salgartrucks</option>
+        <option value="400">Lascolinas</option>
+      </select>
+
+      <label for="carroceria">Carrocería:</label>
+      <select id="carroceria">
+        <option value="">-- Seleccionar --</option>
+        <option value="todos">Todos</option>
+        <option value="TRACTO">Tractoras</option>
+        <option value="FURGON">Furgones</option>
+        <option value="GANCHO">Ganchos</option>
+        <option value="LONAS">Lonas</option>
+        <option value="VOLQUETE">Volquetes</option>
+        <option value="FRIGO">Frigorífico</option>
+      </select>
+
+      <label for="marque">Vehículos:</label>
+      <div id="vehicle-container">
+        <div id="vehicle-list" class="vehicle-list" style="display: none">
+          <!-- Los vehículos se cargarán aquí como checkboxes -->
         </div>
-        
-        <div id="selection-info" style="background: #e9ecef; padding: 5px 8px; border-radius: 4px; font-size: 12px; margin-top: 5px; display: none;">
-            <span id="selected-count">0</span> vehículos seleccionados
-            <button id="clear-selection" style="float: right; background: #6c757d; color: white; border: none; padding: 2px 6px; border-radius: 3px; font-size: 10px; cursor: pointer;">Limpiar</button>
+        <div id="vehicle-placeholder" class="vehicle-placeholder">
+          -- Selecciona carrocería primero --
         </div>
-        
-        <div class="buttons">
-            <button id="add">+</button>
-            <button id="delete">🗑</button>
-            <button id="milanuncios">📄</button>
-            <button id="loop">🔄</button>
+      </div>
+
+      <div id="selection-info" class="selection-info">
+        <span id="selected-count">0</span> vehículos seleccionados
+        <button id="clear-selection" class="btn-clear">Limpiar</button>
+      </div>
+
+      <div class="buttons">
+        <button
+          id="add"
+          class="icon-button icon-button--add"
+          title="Añadir vehículo"
+        >
+          <span class="material-symbols-outlined">add</span>
+        </button>
+        <button
+          id="delete"
+          class="icon-button icon-button--delete"
+          title="Eliminar seleccionados"
+        >
+          <span class="material-symbols-outlined">delete</span>
+        </button>
+        <button
+          id="milanuncios"
+          class="icon-button icon-button--edit"
+          title="Editar / exportar"
+        >
+          <span class="material-symbols-outlined">edit</span>
+        </button>
+        <button
+          id="loop"
+          class="icon-button icon-button--loop"
+          title="Panel automatización"
+        >
+          <span class="material-symbols-outlined">autoplay</span>
+        </button>
+      </div>
+
+      <div id="automation-panel" class="automation-panel">
+        <div class="automation-header">
+          <span class="material-symbols-outlined automation-icon"
+            >smart_toy</span
+          >
+          <div class="automation-header-text">
+            <h3>Automatización</h3>
+            <span class="automation-subtitle"
+              >Autoline · Europa-camiones · Coches.net · Wallapop</span
+            >
+          </div>
         </div>
-        
-        <div id="automation-panel" class="automation-panel">
-            <h3>🤖 Automatización Autoline</h3>
-            
-            <div id="status" class="status">
-                <span>Listo para comenzar</span>
-            </div>
-            
-            <div id="queue-status" class="queue-status">
-                <div>Cola de procesamiento:</div>
-                <div id="queue-info">
-                    <span class="current-processing">Procesando: <span id="current-vehicle">-</span></span><br>
-                    <span>Restantes: <span id="remaining-count">0</span></span>
-                </div>
-            </div>
-            
-            <div class="control-buttons">
-                <button id="start-btn">▶️ Iniciar</button>
-                <button id="stop-btn">⏹️ Detener</button>
-                <button id="reset-btn">🔄 Reset</button>
-            </div>
-            
-            <div id="progress" class="progress">
-                <div id="progress-bar" class="progress-bar"></div>
-            </div>
-            
-            <div id="log" class="log"></div>
+
+        <div id="status" class="status">
+          <span>
+            <span class="material-symbols-outlined status-icon">info</span>
+            Listo para comenzar
+          </span>
         </div>
+
+        <div id="queue-status" class="queue-status">
+          <div class="queue-row">
+            <span class="material-symbols-outlined queue-icon"
+              >playlist_play</span
+            >
+            <div id="queue-info">
+              <span class="current-processing">
+                Procesando: <span id="current-vehicle">-</span>
+              </span>
+              <span class="queue-remaining">
+                · Restantes: <span id="remaining-count">0</span>
+              </span>
+            </div>
+          </div>
+        </div>
+
+        <div class="control-buttons">
+          <button id="start-btn" class="control-btn control-btn--start">
+            <span class="material-symbols-outlined">play_arrow</span>
+            <span>Iniciar</span>
+          </button>
+
+          <button id="stop-btn" class="control-btn control-btn--stop hidden">
+            <span class="material-symbols-outlined">dangerous</span>
+            <span>Detener</span>
+          </button>
+
+          <button id="reset-btn" class="control-btn control-btn--reset">
+            <span class="material-symbols-outlined">restart_alt</span>
+            <span>Reset</span>
+          </button>
+        </div>
+
+        <div id="progress" class="progress">
+          <div id="progress-bar" class="progress-bar"></div>
+        </div>
+
+        <div id="log" class="log"></div>
+      </div>
     </div>
 
     <script src="popup.js"></script>
-</body>
+  </body>
 </html>

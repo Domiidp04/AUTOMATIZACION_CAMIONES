@@ -1,327 +1,560 @@
-* {
-    margin: 0;
-    padding: 0;
-    box-sizing: border-box;
-}
-
+/* === Layout general del popup === */
 body {
-    width: 350px;
-    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-    color: #333;
+  width: 320px; /* un pelín más ancho */
+  padding: 15px;
+  font-family: Arial, sans-serif;
+  background: #f5f5f5;
 }
 
 .container {
-    background: white;
-    border-radius: 12px;
-    margin: 8px;
-    padding: 20px;
-    box-shadow: 0 8px 32px rgba(0,0,0,0.1);
+  background: white;
+  padding: 15px;
+  border-radius: 8px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
 }
 
-.header {
-    text-align: center;
-    margin-bottom: 20px;
-    background: white;
-    margin: 8px 8px 0 8px;
-    padding: 15px;
-    border-radius: 12px 12px 0 0;
-    box-shadow: 0 4px 16px rgba(0,0,0,0.1);
+h1 {
+  color: #333;
+  margin: 0 0 15px 0;
+  font-size: 18px;
+  text-align: center;
 }
 
-.header h1 {
-    color: #2c3e50;
-    margin-bottom: 5px;
-    font-size: 20px;
+select,
+input {
+  width: 100%;
+  padding: 8px;
+  margin: 5px 0;
+  border: 1px solid #ddd;
+  border-radius: 4px;
+  box-sizing: border-box;
 }
 
-.version {
-    color: #7f8c8d;
-    font-size: 11px;
-    font-weight: 500;
+label {
+  font-weight: bold;
+  color: #555;
+  display: block;
+  margin-top: 10px;
 }
 
-.form-group {
-    margin-bottom: 15px;
-}
-
-.form-label {
-    display: block;
-    font-weight: 600;
-    color: #2c3e50;
-    margin-bottom: 5px;
-    font-size: 12px;
-}
-
-.form-select {
-    width: 100%;
-    padding: 8px 12px;
-    border: 2px solid #ecf0f1;
-    border-radius: 6px;
-    background: white;
-    font-size: 12px;
-    transition: all 0.3s ease;
-}
-
-.form-select:focus {
-    outline: none;
-    border-color: #667eea;
-    box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
-}
-
-.divider {
-    height: 1px;
-    background: linear-gradient(90deg, transparent, #ecf0f1, transparent);
-    margin: 15px 0;
-}
-
-.actions-container {
-    display: flex;
-    gap: 8px;
-    justify-content: space-between;
-    margin-bottom: 15px;
-}
-
-.btn {
-    flex: 1;
-    padding: 12px;
-    border: none;
-    border-radius: 8px;
-    font-size: 18px;
-    cursor: pointer;
-    transition: all 0.3s ease;
-    background: #ecf0f1;
-    color: #2c3e50;
-    position: relative;
-    overflow: hidden;
-}
-
-.btn:hover {
-    transform: translateY(-2px);
-    box-shadow: 0 4px 12px rgba(0,0,0,0.15);
-}
-
-.btn:active {
-    transform: translateY(0);
-}
-
-.btn-automation {
-    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-    color: white;
-    font-weight: 600;
-}
-
-.btn-automation:hover {
-    background: linear-gradient(135deg, #5a67d8 0%, #6b4c93 100%);
-    box-shadow: 0 6px 20px rgba(102, 126, 234, 0.4);
-}
-
-.client-badge {
-    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-    color: white;
-    padding: 4px 8px;
-    border-radius: 12px;
-    font-size: 10px;
-    margin-top: 5px;
-    text-align: center;
-}
-
-.footer {
-    background: rgba(255,255,255,0.9);
-    text-align: center;
-    padding: 10px;
-    margin: 0 8px 8px 8px;
-    border-radius: 0 0 12px 12px;
-    font-size: 11px;
-    color: #7f8c8d;
-}
-
-/* Estilos para el panel de automatización */
+/* === Panel de automatización / estado === */
 .automation-panel {
-    background: #f8f9fa;
-    border-radius: 8px;
-    padding: 15px;
-    margin-top: 20px;
-    border: 1px solid #e9ecef;
+  background: #f8f9fa;
+  border: 1px solid #ddd;
+  border-radius: 6px;
+  padding: 15px;
+  margin-top: 15px;
+  display: none;
 }
 
-.automation-header {
-    margin-bottom: 15px;
+.automation-panel h3 {
+  margin: 0 0 10px 0;
+  color: #333;
+  font-size: 14px;
 }
 
-.automation-header h3 {
-    color: #2c3e50;
-    font-size: 14px;
-    margin-bottom: 8px;
+.status {
+  padding: 8px;
+  border-radius: 4px;
+  background: #e9ecef;
+  text-align: center;
+  margin: 10px 0;
+  font-size: 12px;
 }
 
-.automation-status {
-    background: #ecf0f1;
-    padding: 8px 12px;
-    border-radius: 6px;
-    text-align: center;
-    border-left: 4px solid #3498db;
-    font-size: 12px;
+.status.running {
+  background: #fff3cd;
+}
+.status.success {
+  background: #d4edda;
+}
+.status.error {
+  background: #f8d7da;
 }
 
-.automation-status.running {
-    background: #fff3cd;
-    border-left-color: #ffc107;
+/* Contenedor de botones de automatización */
+.control-buttons {
+  display: flex;
+  gap: 6px;
+  margin: 10px 0;
 }
 
-.automation-status.success {
-    background: #d4edda;
-    border-left-color: #28a745;
+/* Botón de control genérico */
+.control-btn {
+  flex: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 8px 10px;
+  border-radius: 6px;
+  border: none;
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 600;
+  color: #fff;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.15);
+  transition: background-color 0.15s ease, box-shadow 0.15s ease,
+    transform 0.08s ease;
+  white-space: nowrap;
 }
 
-.automation-status.error {
-    background: #f8d7da;
-    border-left-color: #dc3545;
+/* Icono dentro del botón */
+.control-btn .material-symbols-outlined {
+  font-size: 18px;
+  line-height: 1;
 }
 
-.automation-controls {
-    display: flex;
-    flex-direction: column;
-    gap: 8px;
-    margin-bottom: 15px;
+/* Colores por acción */
+.control-btn--start {
+  background: #007cba;
+}
+.control-btn--start:hover {
+  background: #005a9c;
 }
 
-.btn-primary, .btn-secondary, .btn-reset {
-    padding: 10px 14px;
-    border: none;
-    border-radius: 6px;
-    font-size: 12px;
-    font-weight: 600;
-    cursor: pointer;
-    transition: all 0.3s ease;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    gap: 6px;
+.control-btn--stop {
+  background: #dc3545;
+}
+.control-btn--stop:hover {
+  background: #c82333;
 }
 
-.btn-primary {
-    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-    color: white;
+.control-btn--reset {
+  background: #6c757d;
+}
+.control-btn--reset:hover {
+  background: #545b62;
 }
 
-.btn-primary:hover {
-    transform: translateY(-1px);
-    box-shadow: 0 4px 12px rgba(102, 126, 234, 0.4);
+/* Efecto pulsado */
+.control-btn:active {
+  transform: translateY(1px) scale(0.98);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.25);
 }
 
-.btn-secondary {
-    background: #e74c3c;
-    color: white;
-}
-
-.btn-secondary:hover {
-    background: #c0392b;
-}
-
-.btn-reset {
-    background: #95a5a6;
-    color: white;
-    font-size: 11px;
-    padding: 6px 10px;
-}
-
-.btn-reset:hover {
-    background: #7f8c8d;
-}
-
-.automation-progress {
-    margin-bottom: 15px;
-}
-
-.progress-bar {
-    background: #ecf0f1;
-    height: 6px;
-    border-radius: 3px;
-    overflow: hidden;
-    margin-bottom: 6px;
-}
-
-.progress-fill {
-    background: linear-gradient(90deg, #667eea, #764ba2);
-    height: 100%;
-    width: 0%;
-    transition: width 0.5s ease;
-}
-
-.progress-text {
-    text-align: center;
-    font-size: 11px;
-    color: #7f8c8d;
-    font-weight: 600;
-}
-
-.automation-log {
-    background: white;
-    border-radius: 6px;
-    padding: 12px;
-    max-height: 150px;
-    overflow-y: auto;
-}
-
-.automation-log h4 {
-    color: #2c3e50;
-    margin-bottom: 8px;
-    font-size: 12px;
-}
-
-.log-content {
-    font-size: 11px;
+.log {
+  background: white;
+  border: 1px solid #ddd;
+  border-radius: 4px;
+  padding: 8px;
+  max-height: 120px;
+  overflow-y: auto;
+  font-size: 11px;
+  margin-top: 10px;
 }
 
 .log-entry {
-    padding: 3px 0;
-    border-bottom: 1px solid #ecf0f1;
-    color: #5a6c7d;
-    line-height: 1.4;
+  padding: 2px 0;
+  border-bottom: 1px solid #eee;
 }
 
 .log-entry:last-child {
-    border-bottom: none;
+  border-bottom: none;
 }
 
-.log-entry.success {
-    color: #27ae60;
+.progress {
+  background: #e9ecef;
+  border-radius: 4px;
+  height: 8px;
+  margin: 10px 0;
+  overflow: hidden;
+  display: none;
 }
 
-.log-entry.error {
-    color: #e74c3c;
+.progress-bar {
+  background: #007cba;
+  height: 100%;
+  width: 0%;
+  transition: width 0.3s;
 }
 
-.log-entry.info {
-    color: #3498db;
+.queue-status {
+  background: #fff3cd;
+  border: 1px solid #ffeaa7;
+  border-radius: 4px;
+  padding: 8px;
+  margin: 10px 0;
+  font-size: 12px;
+  display: none;
 }
 
-/* Animaciones */
-@keyframes pulse {
-    0% { opacity: 1; }
-    50% { opacity: 0.5; }
-    100% { opacity: 1; }
+.queue-status.active {
+  display: block;
 }
 
-.btn-automation.active {
-    animation: pulse 2s infinite;
+.current-processing {
+  font-weight: bold;
+  color: #007cba;
 }
 
-/* Scrollbar personalizado */
-.log-content::-webkit-scrollbar {
-    width: 4px;
+/* === Lista de vehículos / checkboxes === */
+
+/* Contenedor de la lista de vehículos */
+.vehicle-list {
+  max-height: 260px; /* más alto para ver más filas */
+  overflow-y: auto;
+  border: 1px solid #ddd;
+  border-radius: 4px;
+  background: #fff;
+  padding: 0;
+  box-sizing: border-box;
+  font-size: 11px;
 }
 
-.log-content::-webkit-scrollbar-track {
-    background: #f1f1f1;
+/* Placeholder cuando todavía no hay vehículos */
+.vehicle-placeholder {
+  padding: 6px 8px;
+  border: 1px solid #ddd;
+  border-radius: 4px;
+  background: #f8f9fa;
+  color: #6c757d;
+  font-size: 11px;
 }
 
-.log-content::-webkit-scrollbar-thumb {
-    background: #888;
-    border-radius: 2px;
+/* Fila genérica de vehículo – la usamos como <label> clicable */
+.vehicle-item {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  box-sizing: border-box;
+  padding: 2px 6px;
+  margin: 0; /* sobrescribe margin-top de label */
+  border-bottom: 1px solid #eee;
+  cursor: pointer;
+  transition: background 0.15s;
+  min-height: 18px;
+  user-select: none;
 }
 
-.log-content::-webkit-scrollbar-thumb:hover {
-    background: #555;
+.vehicle-item:hover {
+  background: #f1f3f5;
+}
+
+.vehicle-item:last-child {
+  border-bottom: none;
+}
+
+/* Checkbox reducido */
+.vehicle-checkbox {
+  margin-right: 6px;
+  width: 14px;
+  height: 14px;
+  flex: 0 0 auto;
+}
+
+/* Texto del código del vehículo */
+.vehicle-code {
+  flex: 1 1 auto;
+  font-size: 11px;
+}
+
+/* Fila "Seleccionar todos" – también es <label> */
+.select-all-container {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  width: 100%;
+  box-sizing: border-box;
+  background: #f8f9fa;
+  border-bottom: 1px solid #ddd;
+  padding: 4px 6px;
+  margin: 0; /* sobrescribe margin-top de label */
+  font-weight: bold;
+  font-size: 11px;
+  cursor: pointer;
+  user-select: none;
+}
+
+.select-all-container input[type="checkbox"] {
+  margin-right: 6px;
+}
+
+.select-all-container span {
+  flex: 1 1 auto;
+}
+
+/* Info de selección (debajo de la lista) */
+.selection-info {
+  background: #e9ecef;
+  padding: 5px 8px;
+  border-radius: 4px;
+  font-size: 12px;
+  margin-top: 5px;
+  display: none;
+}
+
+.selection-info #selected-count {
+  font-weight: 700;
+}
+
+.btn-clear {
+  float: right;
+  background: #6c757d;
+  color: #fff;
+  border: none;
+  padding: 2px 6px;
+  border-radius: 3px;
+  font-size: 10px;
+  cursor: pointer;
+}
+.btn-clear:hover {
+  background: #545b62;
+}
+
+/* === Botones principales con Material Symbols === */
+
+/* Fuente de iconos */
+.material-symbols-outlined {
+  font-variation-settings: "FILL" 0, "wght" 400, "GRAD" 0, "opsz" 24;
+}
+
+/* Contenedor de botones principales */
+.buttons {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 6px;
+  margin: 10px 0;
+}
+
+/* Botón icono genérico */
+.icon-button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 6px;
+  border-radius: 6px;
+  border: none;
+  cursor: pointer;
+  background: #e9ecef;
+  color: #ffffff;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.12);
+  transition: background-color 0.15s ease, box-shadow 0.15s ease,
+    transform 0.08s ease;
+}
+
+.icon-button .material-symbols-outlined {
+  font-size: 22px;
+}
+
+/* Colores por acción */
+.icon-button--add {
+  background: #22c55e; /* verde */
+}
+.icon-button--add:hover {
+  background: #16a34a;
+}
+
+.icon-button--delete {
+  background: #ef4444; /* rojo */
+}
+.icon-button--delete:hover {
+  background: #dc2626;
+}
+
+.icon-button--edit {
+  background: #f59e0b; /* amarillo/naranja */
+}
+.icon-button--edit:hover {
+  background: #d97706;
+}
+
+.icon-button--loop {
+  background: #3b82f6; /* azul */
+}
+.icon-button--loop:hover {
+  background: #2563eb;
+}
+
+/* Efecto común hover / active */
+.icon-button:hover {
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.18);
+}
+
+.icon-button:active {
+  transform: translateY(1px) scale(0.98);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2);
+}
+
+/* ===== Panel de automatización mejorado ===== */
+
+.automation-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.automation-icon {
+  font-size: 26px;
+  color: #3b82f6;
+  background: #e0f2fe;
+  border-radius: 999px;
+  padding: 4px;
+}
+
+.automation-header-text h3 {
+  margin: 0;
+  font-size: 14px;
+  color: #111827;
+}
+
+.automation-subtitle {
+  font-size: 11px;
+  color: #6b7280;
+}
+
+/* Status con icono centrado */
+.status span {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+}
+
+.status-icon {
+  font-size: 16px;
+}
+
+/* Cola de procesamiento */
+.queue-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.queue-icon {
+  font-size: 18px;
+  color: #d97706;
+}
+
+#queue-info {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px 6px;
+  font-size: 11px;
+}
+
+.queue-remaining {
+  color: #4b5563;
+}
+
+/* Botones de control con iconos */
+.control-buttons {
+  display: flex;
+  gap: 6px;
+  margin: 10px 0;
+}
+
+.control-buttons .control-btn {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  font-size: 12px;
+  padding: 7px 8px;
+  border-radius: 6px;
+  border: none;
+  cursor: pointer;
+  color: #ffffff;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.15);
+  transition: background-color 0.15s ease, box-shadow 0.15s ease,
+    transform 0.07s ease;
+}
+
+.control-buttons .control-btn .material-symbols-outlined {
+  font-size: 18px;
+}
+
+/* Colores por acción */
+.control-btn--start {
+  background: #22c55e;
+}
+.control-btn--start:hover {
+  background: #16a34a;
+}
+
+.control-btn--stop {
+  background: #ef4444;
+}
+.control-btn--stop:hover {
+  background: #dc2626;
+}
+
+.control-btn--reset {
+  background: #6b7280;
+}
+.control-btn--reset:hover {
+  background: #4b5563;
+}
+
+/* Efecto común hover / active */
+.control-buttons .control-btn:hover {
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.18);
+}
+
+.control-buttons .control-btn:active {
+  transform: translateY(1px) scale(0.98);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.25);
+}
+
+/* Botones de control (ya los tendrás, lo importante es NO usar display en JS) */
+.control-buttons {
+  display: flex;
+  gap: 6px;
+  margin: 10px 0;
+}
+
+.control-btn {
+  flex: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 8px 10px;
+  border-radius: 6px;
+  border: none;
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 600;
+  color: #fff;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.15);
+  transition: background-color 0.15s ease, box-shadow 0.15s ease,
+    transform 0.08s ease;
+  white-space: nowrap;
+}
+
+.control-btn .material-symbols-outlined {
+  font-size: 18px;
+  line-height: 1;
+}
+
+/* Colores */
+.control-btn--start {
+  background: #007cba;
+}
+.control-btn--start:hover {
+  background: #005a9c;
+}
+
+.control-btn--stop {
+  background: #dc3545;
+}
+.control-btn--stop:hover {
+  background: #c82333;
+}
+
+.control-btn--reset {
+  background: #6c757d;
+}
+.control-btn--reset:hover {
+  background: #545b62;
+}
+
+/* Ocultar/mostrar sin romper el display:flex */
+.hidden {
+  display: none !important;
 }
