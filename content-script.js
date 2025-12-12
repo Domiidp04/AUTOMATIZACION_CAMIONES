@@ -19,11 +19,6 @@ function _preparaWebLegacy() {
   document
     .querySelectorAll(".select2-hidden-accessible")
     ?.forEach((el) => el.classList.remove("select2-hidden-accessible"));
-  document
-    .querySelectorAll(
-      ".select2-selection__rendered, .select2-selection, .select2-container"
-    )
-    ?.forEach((el) => el.remove());
   // Mostrar todas las secciones del formulario
   document
     .querySelectorAll("div.section-content")
@@ -556,13 +551,182 @@ async _seleccionarCategoriaAutoline() {
   return true;
 }
 
+async _ensureModelUIReady() {
+  // Si el modelo no está visible o no existe, intenta “abrir” el bloque
+  const isModelVisible = () => {
+    const row = document.querySelector(".block-row.model-row");
+    return row && this._isVisible(row);
+  };
+
+  if (isModelVisible()) return true;
+
+  const toggles = Array.from(document.querySelectorAll(".block-toggle-btn"));
+  // clicka el toggle más cercano a la zona de params (normalmente solo hay 1)
+  for (const t of toggles) {
+    if (!this._isVisible(t)) continue;
+    this._smoothClick(t);
+    await this._delay(250);
+    if (isModelVisible()) return true;
+  }
+
+  // aunque no se vea, puede estar en DOM; devolvemos true para intentar igualmente
+  return true;
+}
+
+async _openModelSelect2(row) {
+  // Intenta varios “openers” posibles
+  const openers = [
+    row.querySelector(".select2-selection"),
+    row.querySelector(".select2-container .select2-selection"),
+    row.querySelector(".select2"), // a veces el wrapper clicable es el span.select2
+  ].filter(Boolean);
+
+  for (const op of openers) {
+    if (!this._isVisible(op)) continue;
+    // mousedown suele abrir mejor que click en select2
+    try {
+      op.dispatchEvent(new MouseEvent("mousedown", { bubbles: true, cancelable: true, view: window }));
+    } catch {}
+    this._smoothClick(op);
+    await this._delay(200);
+
+    const search = document.querySelector(".select2-container--open .select2-search__field");
+    if (search) return search;
+  }
+
+  // fallback: click en la row para que inicialice
+  this._smoothClick(row);
+  await this._delay(200);
+  return document.querySelector(".select2-container--open .select2-search__field");
+}
+
+_setNativeValue(el, value) {
+  const val = value == null ? "" : String(value);
+  const proto =
+    el instanceof HTMLInputElement
+      ? window.HTMLInputElement.prototype
+      : el instanceof HTMLTextAreaElement
+      ? window.HTMLTextAreaElement.prototype
+      : window.HTMLElement.prototype;
+
+  const desc = Object.getOwnPropertyDescriptor(proto, "value");
+  if (desc?.set) desc.set.call(el, val);
+  else el.value = val;
+
+  el.dispatchEvent(new Event("input", { bubbles: true }));
+  el.dispatchEvent(new Event("change", { bubbles: true }));
+}
+
+async _setModeloAutoline(valor) {
+  const txt = (valor || "").toString().trim();
+  if (!txt) return true;
+
+  await this._ensureModelUIReady();
+
+  const row = document.querySelector(".block-row.model-row");
+  if (!row) {
+    this._log("❌ MODELO: no encuentro .block-row.model-row (ni tras abrir bloque)", "error");
+    return false;
+  }
+
+  // OJO: NO dependemos de select2-hidden-accessible
+  const selReal =
+    row.querySelector("select.field-id-model") ||
+    row.querySelector("select[name='v--model']") ||
+    row.querySelector("select");
+
+  // Si hay select real con opciones, intenta match directo (sin abrir nada)
+  if (selReal && selReal.options && selReal.options.length > 1) {
+    const opts = Array.from(selReal.options);
+    const exact = opts.find(o => (o.textContent || "").trim().toLowerCase() === txt.toLowerCase());
+    if (exact) {
+      selReal.value = exact.value;
+      selReal.dispatchEvent(new Event("change", { bubbles: true }));
+      await this._delay(150);
+      this._log(`✅ MODELO: set directo <select> → "${exact.textContent.trim()}"`, "success");
+      return true;
+    }
+  }
+
+  // Abrir Select2 y escribir en el buscador
+  const search = await this._openModelSelect2(row);
+  if (!search) {
+    // último fallback: cualquier input type=search visible (cuando se abre dropdown)
+    const anySearch = Array.from(document.querySelectorAll("input[type='search']")).find(i => this._isVisible(i));
+    if (!anySearch) {
+      this._log("❌ MODELO: no aparece input de búsqueda (select2)", "error");
+      return false;
+    }
+    this._setNativeValue(anySearch, txt);
+    await this._delay(250);
+  } else {
+    this._setNativeValue(search, txt);
+    await this._delay(250);
+  }
+
+  // Esperar resultados y seleccionar (exacto > contiene > primero)
+  const getItems = () =>
+    Array.from(document.querySelectorAll(".select2-container--open .select2-results__option[role='treeitem']"))
+      .filter(li => (li.textContent || "").trim().length && !li.classList.contains("select2-results__option--disabled"));
+
+  let items = getItems();
+  for (let i = 0; i < 15 && items.length === 0; i++) {
+    await this._delay(120);
+    items = getItems();
+  }
+
+  if (!items.length) {
+    this._log(`❌ MODELO: sin resultados para "${txt}"`, "error");
+    // cierra dropdown si está abierto
+    try { document.body.click(); } catch {}
+    return false;
+  }
+
+  const exactLi = items.find(li => (li.textContent || "").trim().toLowerCase() === txt.toLowerCase());
+  const containsLi = items.find(li => (li.textContent || "").trim().toLowerCase().includes(txt.toLowerCase()));
+  const target = exactLi || containsLi || items[0];
+
+  this._smoothClick(target);
+  await this._delay(200);
+
+  // Verificación ligera (si existe select real)
+  if (selReal && selReal.selectedIndex >= 0) {
+    const st = (selReal.options[selReal.selectedIndex]?.textContent || "").trim();
+    if (st) {
+      this._log(`✅ MODELO: seleccionado → "${st}"`, "success");
+      return true;
+    }
+  }
+
+  this._log("✅ MODELO: seleccionado (sin verificación en <select>, pero dropdown respondió)", "success");
+  return true;
+}
+
+async _confirmSelect2() {
+  const search = document.querySelector(".select2-container--open .select2-search__field");
+  if (search) {
+    // Enter para confirmar selección (Select2 suele seleccionar el highlighted)
+    search.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", code: "Enter", which: 13, keyCode: 13, bubbles: true }));
+    search.dispatchEvent(new KeyboardEvent("keyup",   { key: "Enter", code: "Enter", which: 13, keyCode: 13, bubbles: true }));
+    await this._delay(150);
+  }
+
+  const stillOpen = document.querySelector(".select2-container--open");
+  if (stillOpen) {
+    document.body.dispatchEvent(new MouseEvent("mousedown", { bubbles: true }));
+    document.body.dispatchEvent(new MouseEvent("mouseup", { bubbles: true }));
+    document.body.click();
+    await this._delay(150);
+  }
+}
+
+
 
   async _insertarDatos() {
     if (!this.vehicleData) {
       this._log("⚠️ No hay datos del vehículo; abortando", "error");
       return false;
     }
-    _preparaWebLegacy();
 
     const okForm = await this._esperarFormulario();
     if (!okForm) return false;
@@ -571,9 +735,22 @@ async _seleccionarCategoriaAutoline() {
     const v = this.vehicleData;
 
     // ===== Campos principales =====
-    await this._sel("select[name='v--trademark']", v.au_marca ?? v.marca);
-    await this._inp("input[name='v--model']", v.modelo);
-    await this._inp("input[name='v--kilometrag']", v.kilometros ?? v.km);
+await this._sel("select[name='v--trademark']", v.au_marca ?? v.marca);
+
+// Importante: tras elegir marca, a veces el modelo se rellena/refresh por JS/AJAX
+await this._delay(500);
+
+// Modelo (Select2 + bloque colapsable)
+const okModelo = await this._setModeloAutoline(v.modelo);
+if (!okModelo) {
+  this._log("❌ MODELO: no pude insertar el modelo, paro aquí", "error");
+  return false;
+}
+await this._confirmSelect2();
+
+
+await this._inp("input[name='v--kilometrag']", v.kilometros ?? v.km);
+
 
     // Fechas (fabricación / primer registro / ITV)
     await this._sel("select[name='v--yearmade']", getY(v.fecha_matriculacion));
