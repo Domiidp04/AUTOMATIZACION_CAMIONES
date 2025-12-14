@@ -618,8 +618,15 @@ _setNativeValue(el, value) {
 }
 
 async _setModeloAutoline(valor) {
-  const txt = (valor || "").toString().trim();
+  const txtRaw = (valor || "").toString().trim();
+  const txt = txtRaw;
   if (!txt) return true;
+
+  // Ajustes para red lenta
+  const MAX_ATTEMPTS = 100;          // reintentos completos
+  const OPEN_TIMEOUT = 1200;      // esperar a que se abra select2
+  const RESULTS_TIMEOUT = 2000;   // esperar resultados (AJAX)
+  const APPLY_TIMEOUT = 1200;     // esperar que quede aplicado
 
   await this._ensureModelUIReady();
 
@@ -629,78 +636,170 @@ async _setModeloAutoline(valor) {
     return false;
   }
 
-  // OJO: NO dependemos de select2-hidden-accessible
   const selReal =
     row.querySelector("select.field-id-model") ||
     row.querySelector("select[name='v--model']") ||
     row.querySelector("select");
 
-  // Si hay select real con opciones, intenta match directo (sin abrir nada)
+  // Helpers
+  const sleep = (ms) => this._delay(ms);
+
+  const waitUntil = async (fn, timeoutMs, stepMs = 150) => {
+    const t0 = Date.now();
+    while (Date.now() - t0 < timeoutMs) {
+      try {
+        const v = fn();
+        if (v) return v;
+      } catch {}
+      await sleep(stepMs);
+    }
+    return null;
+  };
+
+  const getRenderedText = () => {
+    // Lo que el usuario ve en el select2 (normalmente aquí se refleja si ya quedó seleccionado)
+    const r =
+      row.querySelector(".select2-selection__rendered") ||
+      row.querySelector(".select2-container .select2-selection__rendered") ||
+      document.querySelector(".select2-container .select2-selection__rendered");
+    return (r?.textContent || "").trim();
+  };
+
+  const isLoadingResults = () => {
+    // Select2 suele marcar “loading-results” o mostrar texto tipo “Buscando…”
+    const container = document.querySelector(".select2-container--open");
+    if (container?.classList?.contains("select2-container--loading")) return true;
+
+    const li = document.querySelector(".select2-container--open .select2-results__option");
+    const t = (li?.textContent || "").toLowerCase();
+    return t.includes("busc") || t.includes("search") || t.includes("cargando") || t.includes("loading");
+  };
+
+  const getItems = () =>
+    Array.from(
+      document.querySelectorAll(
+        ".select2-container--open .select2-results__option[role='treeitem'], " +
+        ".select2-container--open .select2-results__option"
+      )
+    ).filter(li => {
+      const t = (li.textContent || "").trim();
+      if (!t) return false;
+      if (li.classList.contains("select2-results__option--disabled")) return false;
+      // descartamos mensajes tipo "No results found"
+      const low = t.toLowerCase();
+      if (low.includes("no results") || low.includes("sin resultados")) return false;
+      return true;
+    });
+
+  const closeDropdown = async () => {
+    try { document.body.dispatchEvent(new MouseEvent("mousedown", { bubbles: true })); } catch {}
+    try { document.body.dispatchEvent(new MouseEvent("mouseup", { bubbles: true })); } catch {}
+    try { document.body.click(); } catch {}
+    await sleep(120);
+  };
+
+  // 1) Si hay select real con opciones ya disponibles, intenta set directo
   if (selReal && selReal.options && selReal.options.length > 1) {
     const opts = Array.from(selReal.options);
     const exact = opts.find(o => (o.textContent || "").trim().toLowerCase() === txt.toLowerCase());
     if (exact) {
       selReal.value = exact.value;
       selReal.dispatchEvent(new Event("change", { bubbles: true }));
-      await this._delay(150);
-      this._log(`✅ MODELO: set directo <select> → "${exact.textContent.trim()}"`, "success");
-      return true;
+      await sleep(200);
+
+      // verifica
+      const rendered = getRenderedText();
+      if (rendered && rendered.toLowerCase().includes(txt.toLowerCase())) {
+        this._log(`✅ MODELO: set directo <select> → "${exact.textContent.trim()}"`, "success");
+        return true;
+      }
     }
   }
 
-  // Abrir Select2 y escribir en el buscador
-  const search = await this._openModelSelect2(row);
-  if (!search) {
-    // último fallback: cualquier input type=search visible (cuando se abre dropdown)
-    const anySearch = Array.from(document.querySelectorAll("input[type='search']")).find(i => this._isVisible(i));
-    if (!anySearch) {
-      this._log("❌ MODELO: no aparece input de búsqueda (select2)", "error");
-      return false;
+  // 2) Modo robusto select2 con reintentos
+  for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+    this._log(`🧠 MODELO: intento ${attempt}/${MAX_ATTEMPTS} → "${txt}"`, "info");
+
+    // abre select2 y consigue input de búsqueda (espera de verdad)
+    const search = await (async () => {
+      // intenta abrir
+      const s = await this._openModelSelect2(row);
+      if (s) return s;
+
+      // espera a que exista (por si tarda en montarse)
+      return await waitUntil(
+        () => document.querySelector(".select2-container--open .select2-search__field"),
+        OPEN_TIMEOUT
+      );
+    })();
+
+    if (!search) {
+      this._log("⚠️ MODELO: no aparece input de búsqueda (select2). Reintento…", "warning");
+      await sleep(300 + attempt * 250);
+      continue;
     }
-    this._setNativeValue(anySearch, txt);
-    await this._delay(250);
-  } else {
+
+    // escribe (limpia antes)
+    this._setNativeValue(search, "");
+    await sleep(80);
     this._setNativeValue(search, txt);
-    await this._delay(250);
-  }
 
-  // Esperar resultados y seleccionar (exacto > contiene > primero)
-  const getItems = () =>
-    Array.from(document.querySelectorAll(".select2-container--open .select2-results__option[role='treeitem']"))
-      .filter(li => (li.textContent || "").trim().length && !li.classList.contains("select2-results__option--disabled"));
+    // espera resultados: primero a que deje de “cargando” y luego a que haya items
+    await waitUntil(() => !isLoadingResults(), RESULTS_TIMEOUT, 200);
 
-  let items = getItems();
-  for (let i = 0; i < 15 && items.length === 0; i++) {
-    await this._delay(120);
-    items = getItems();
-  }
+    const itemsReady = await waitUntil(() => {
+      const items = getItems();
+      return items.length ? items : null;
+    }, RESULTS_TIMEOUT, 200);
 
-  if (!items.length) {
-    this._log(`❌ MODELO: sin resultados para "${txt}"`, "error");
-    // cierra dropdown si está abierto
-    try { document.body.click(); } catch {}
-    return false;
-  }
+    if (!itemsReady) {
+      this._log(`⚠️ MODELO: no llegaron resultados a tiempo para "${txt}". Reintento…`, "warning");
+      await closeDropdown();
+      await sleep(350 + attempt * 250);
+      continue;
+    }
 
-  const exactLi = items.find(li => (li.textContent || "").trim().toLowerCase() === txt.toLowerCase());
-  const containsLi = items.find(li => (li.textContent || "").trim().toLowerCase().includes(txt.toLowerCase()));
-  const target = exactLi || containsLi || items[0];
+    const items = itemsReady;
 
-  this._smoothClick(target);
-  await this._delay(200);
+    const norm = (s) => (s || "").trim().toLowerCase();
+    const exactLi = items.find(li => norm(li.textContent) === norm(txt));
+    const containsLi = items.find(li => norm(li.textContent).includes(norm(txt)));
+    const target = exactLi || containsLi || items[0];
 
-  // Verificación ligera (si existe select real)
-  if (selReal && selReal.selectedIndex >= 0) {
-    const st = (selReal.options[selReal.selectedIndex]?.textContent || "").trim();
-    if (st) {
-      this._log(`✅ MODELO: seleccionado → "${st}"`, "success");
+    this._smoothClick(target);
+    await sleep(200);
+
+    // intenta confirmar/cerrar por si select2 tarda en aplicar
+    await this._confirmSelect2();
+
+    // verificación fuerte: rendered o select real reflejan valor
+    const applied = await waitUntil(() => {
+      const rendered = getRenderedText();
+      if (rendered && norm(rendered).includes(norm(txt))) return true;
+
+      if (selReal && selReal.selectedIndex >= 0) {
+        const st = (selReal.options[selReal.selectedIndex]?.textContent || "").trim();
+        if (st && norm(st).includes(norm(txt))) return true;
+      }
+      return false;
+    }, APPLY_TIMEOUT, 200);
+
+    if (applied) {
+      const finalTxt = getRenderedText() || (selReal?.options?.[selReal.selectedIndex]?.textContent || "").trim();
+      this._log(`✅ MODELO: seleccionado → "${finalTxt || txt}"`, "success");
       return true;
     }
+
+    // si no quedó aplicado, cierra y reintenta
+    this._log("⚠️ MODELO: selección no se aplicó (timing). Reintento…", "warning");
+    await closeDropdown();
+    await sleep(400 + attempt * 300);
   }
 
-  this._log("✅ MODELO: seleccionado (sin verificación en <select>, pero dropdown respondió)", "success");
-  return true;
+  this._log(`❌ MODELO: no fue posible insertar "${txt}" tras varios intentos`, "error");
+  return false;
 }
+
 
 async _confirmSelect2() {
   const search = document.querySelector(".select2-container--open .select2-search__field");
