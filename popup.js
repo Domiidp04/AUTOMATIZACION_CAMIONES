@@ -76,7 +76,7 @@ const BRANDS = {
     "FURGON",
     "BASCUL",
     "TAUTLIN",
-    "GANADERO",
+    "GANADO",
     "CHASIS",
     "HORMIGON",
     "GANYGRUA",
