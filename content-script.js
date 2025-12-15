@@ -450,10 +450,13 @@ async _seleccionarCategoriaAutoline() {
     GANADERO: "GANADERO",
     CHASIS: "CHASIS",
     HORMIGON: "HORMIGON",
-    "GANCHO+GRUA": "GANCHO_GRUA",
+    "GANYGRUA": "GANYGRUA",
     CISTERNA: "CISTERNA",
     "TWIST LOCK": "TWISTLOCK",
     CARRI: "CARRILLEROS",
+    GANYGRUA: "GANYGRUA",
+    TWIST: "TWIST",
+    BASCUL: "BASCUL"
   };
   let key = MAP[popup] || null;
 
@@ -462,22 +465,23 @@ async _seleccionarCategoriaAutoline() {
   // --- Selectores HTML (Autoline) ---
   const CAMIONES = 'div.option[data-cat-id="2"][data-combination="0"]';
   const SUB = {
+    GRUA:        'div.option[data-cat-id="32"][data-cat-style="autoline"]',     // Camiones cajas abiertas
+    PORTAMAQ:    'div.option[data-cat-id="14"][data-cat-style="autoline"]',     // Camiones portacoches
+    TAUTLIN:     'div.option[data-cat-id="876"][data-cat-style="autoline"]',    // Camiones con lona corredera
+    GANADERO:    'div.option[data-cat-id="16"][data-cat-style="autoline"]',     // Camiones transporte ganado
     FURGON:      'div.option[data-cat-id="12"][data-cat-style="autoline"]',
     FRIGO:       'div.option[data-cat-id="7"][data-cat-style="autoline"]',
     LONAS:       'div.option[data-cat-id="876"][data-cat-style="autoline"]',
     VOLQUETE:    'div.option[data-cat-id="36"][data-cat-style="autoline"]',
     GANCHO:      'div.option[data-cat-id="40"][data-cat-style="autoline"]',
-    GRUA:        'div.option[data-cat-id="32"][data-cat-style="autoline"]',     // Camiones cajas abiertas
     SEMITAUT:    'div.option[data-cat-id="4"][data-cat-style="autoline"]',      // Camiones toldos
-    PORTAMAQ:    'div.option[data-cat-id="14"][data-cat-style="autoline"]',     // Camiones portacoches
-    TAUTLIN:     'div.option[data-cat-id="876"][data-cat-style="autoline"]',    // Camiones con lona corredera
-    GANADERO:    'div.option[data-cat-id="16"][data-cat-style="autoline"]',     // Camiones transporte ganado
-    CHASIS:      'div.option[data-cat-id="16"][data-cat-style="autoline"]',     // Igual que Ganadero
+    CHASIS:      'div.option[data-cat-id="37"][data-cat-style="autoline"]',     // Igual que Ganadero
     HORMIGON:    'div.option[data-cat-id="26"][data-cat-style="autoline"]',     // Camiones cisternas de cemento
-    GANCHO_GRUA: 'div.option[data-cat-id="40"][data-cat-style="autoline"]',     // Camiones con gancho
+    GANYGRUA:    'div.option[data-cat-id="40"][data-cat-style="autoline"]',     // Camiones con gancho
     CISTERNA:    'div.option[data-cat-id="29"][data-cat-style="autoline"]',     // Camiones cisterna
-    TWISTLOCK:   'div.option[data-cat-id="34"][data-cat-style="autoline"]',     // Camiones contenedores
+    TWIST:       'div.option[data-cat-id="34"][data-cat-style="autoline"]',     // Camiones contenedores
     CARRILLEROS: 'div.option[data-cat-id="2474"][data-cat-style="autoline"]',   // Camiones para caballos
+    BASCUL:      'div.option[data-cat-id="36"][data-cat-style="autoline"]',     // Volquetes
   };
   const TRACTO_TRIES = [
     'div.option[data-cat-id="42"]',
@@ -2210,7 +2214,7 @@ async _waitStableLayout(container = document.body, timeout = 4000) {
     return !!moved;
   }
 
-// ====== PASO 2: Selección de categoría según la CARROCERÍA del POPUP ======
+  // ====== PASO 2: Selección de categoría según la CARROCERÍA del POPUP ======
 async _seleccionarCategoria() {
   // Si ya estamos en el formulario, saltamos
   if (/\/vehicle\/(new|[^/]+\/edit)/i.test(location.pathname) && this._hasUsableForm()) {
@@ -2232,26 +2236,29 @@ async _seleccionarCategoria() {
     FURGONET: "FURGONET",
     GRUA: "GRUA",
     "SEMI-TAUTLINE": "SEMITAUT",
-    PORTAMAQUINARIA: "PORTAMAQ",
-    TAUTLINE: "TAUTLINE",
-    GANADERO: "GANADERO",
+    PORTAMAQ: "PORTAMAQ",
+    TAUTLIN: "TAUTLIN",
+    GANADO: "GANADO",
     CHASIS: "CHASIS",
     HORMIGON: "HORMIGON",
     "GANCHO+GRUA": "GANCHO_GRUA",
     CISTERNA: "CISTERNA",
-    TWISTLOCK: "TWISTLOCK",
+    TWIST: "TWIST",
     CARRILLEROS: "CARRILLEROS",
+    GANYGRUA: "GANYGRUA",
+    BASCUL: "BASCUL",
   };
   let key = MAP[popupRaw] || null;
 
   // --- fallback heurístico ---
   if (!key) {
-    const raw = [
-      this.vehicleData?.categoria,
-      this.vehicleData?.carroceria,
-      this.vehicleData?.tipo,
-      this.vehicleData?.categoria_eu,
-    ].find(Boolean) || "";
+    const raw =
+      this.vehicleData?.categoria ||
+      this.vehicleData?.carroceria ||
+      this.vehicleData?.tipo ||
+      this.vehicleData?.categoria_eu ||
+      "";
+
     const norm = (s) =>
       (s || "")
         .normalize("NFD")
@@ -2259,7 +2266,9 @@ async _seleccionarCategoria() {
         .replace(/\s+/g, " ")
         .trim()
         .toLowerCase();
+
     const c = norm(raw);
+
     if (/tractor|tracto/i.test(c)) key = "TRACTO";
     else if (/furgon(?!eta)/i.test(c)) key = "FURGON";
     else if (/frigo/i.test(c)) key = "FRIGO";
@@ -2271,42 +2280,173 @@ async _seleccionarCategoria() {
 
   // --- Tabla de categorías (href params) ---
   const DEST = {
-    // CABEZAS TRACTORAS
-    TRACTO: { name: "Cabeza tractora → Estándar", parts: ["cat=31", "var=68"], text: /estandar|tractora/i },
+    // CABEZAS TRACTORAS / BASCUL
+    BASCUL: {
+      name: "Volquete",
+      parts: ["fml=1", "cat=32", "var=74"],
+      text: /volquete/i,
+    },
+    TRACTO: {
+      name: "Cabeza tractora → Estándar",
+      parts: ["fml=1", "cat=31", "var=68"],
+      text: /estandar|tractora/i,
+    },
+
     // SEMIRREMOLQUES CAT=32
-    FURGON: { name: "Furgón", parts: ["cat=32", "var=76"], text: /furgon/i },
-    FRIGO: { name: "Frigorífico", parts: ["cat=32", "var=78"], text: /frigo/i },
-    LONAS: { name: "Tautliner (lonas correderas)", parts: ["cat=32", "var=160"], text: /tautliner|lona/i },
-    VOLQUETE: { name: "Volquete", parts: ["cat=32", "var=74"], text: /volquete/i },
-    GANCHO: { name: "Portacontenedor de gancho", parts: ["cat=32", "var=260"], text: /gancho/i },
+    FURGON: {
+      name: "Furgón",
+      parts: ["fml=1", "cat=32", "var=76"],
+      text: /furgon/i,
+    },
+    FRIGO: {
+      name: "Frigorífico",
+      parts: ["fml=1", "cat=32", "var=78"],
+      text: /frigo/i,
+    },
+    LONAS: {
+      name: "Tautliner (lonas correderas)",
+      parts: ["fml=1", "cat=32", "var=160"],
+      text: /tautliner|lona/i,
+    },
+    VOLQUETE: {
+      name: "Volquete",
+      parts: ["fml=1", "cat=32", "var=74"],
+      text: /volquete/i,
+    },
+    GANCHO: {
+      name: "Portacontenedor de gancho",
+      parts: ["fml=1", "cat=32", "var=260"],
+      text: /gancho/i,
+    },
+
     // TURISMOS
-    TURISMO: { name: "Berlina (turismo)", parts: ["fml=3", "cat=37", "var=527"], text: /berlina|turismo/i },
-    FURGONET: { name: "Furgoneta (turismo)", parts: ["fml=3", "cat=37", "var=281"], text: /furgoneta/i },
+    TURISMO: {
+      name: "Berlina (turismo)",
+      parts: ["fml=3", "cat=37", "var=527"],
+      text: /berlina|turismo/i,
+    },
+    FURGONET: {
+      name: "Furgoneta (turismo)",
+      parts: ["fml=3", "cat=37", "var=281"],
+      text: /furgoneta/i,
+    },
+
     // NUEVAS CARROCERÍAS
-    GRUA: { name: "Plataforma (grúa)", parts: ["cat=32", "var=79"], text: /plataforma|grua/i },
-    SEMITAUT: { name: "Lona (semi-tautliner)", parts: ["cat=32", "var=80"], text: /lona|semi/i },
-    PORTAMAQ: { name: "Porta máquinas", parts: ["cat=32", "var=87"], text: /maquina|porta/i },
-    TAUTLINE: { name: "Tautliner (lonas correderas)", parts: ["cat=32", "var=160"], text: /tautliner|lona/i },
-    GANADERO: { name: "Para ganado", parts: ["cat=32", "var=72"], text: /ganado/i },
-    CHASIS: { name: "Chasis", parts: ["cat=32", "var=83"], text: /chasis/i },
-    HORMIGON: { name: "Hormigón", parts: ["cat=32", "var=132"], text: /hormigon/i },
-    GANCHO_GRUA: { name: "Portacontenedor de gancho", parts: ["cat=32", "var=260"], text: /gancho/i },
-    CISTERNA: { name: "Cisterna", parts: ["cat=32", "var=75"], text: /cisterna/i },
-    TWISTLOCK: { name: "Portacontenedores", parts: ["cat=32", "var=98"], text: /contenedor|twist/i },
-    CARRILLEROS: { name: "Transporte de caballos", parts: ["cat=32", "var=131"], text: /caballo|carrillero|transporte/i },
+    GRUA: {
+      name: "Plataforma (grúa)",
+      parts: ["fml=1", "cat=32", "var=79"],
+      text: /plataforma|grua/i,
+    },
+    SEMITAUT: {
+      name: "Lona (semi-tautliner)",
+      parts: ["fml=1", "cat=32", "var=80"],
+      text: /lona|semi/i,
+    },
+    PORTAMAQ: {
+      name: "Porta máquinas",
+      parts: ["fml=1", "cat=32", "var=87"],
+      text: /maquina|porta/i,
+    },
+    TAUTLIN: {
+      name: "Tautliner (lonas correderas)",
+      parts: ["fml=1", "cat=32", "var=160"],
+      text: /tautliner|lona/i,
+    },
+    GANADO: {
+      name: "Para ganado",
+      parts: ["fml=1", "cat=32", "var=72"],
+      text: /ganado/i,
+    },
+    CHASIS: {
+      name: "Chasis",
+      parts: ["fml=1", "cat=32", "var=83"],
+      text: /chasis/i,
+    },
+    HORMIGON: {
+      name: "Hormigón",
+      parts: ["fml=1", "cat=32", "var=132"],
+      text: /hormigon/i,
+    },
+    GANYGRUA: {
+      name: "Portacontenedor de gancho",
+      parts: ["fml=1", "cat=32", "var=260"],
+      text: /gancho/i,
+    },
+    CISTERNA: {
+      name: "Cisterna",
+      parts: ["fml=1", "cat=32", "var=75"],
+      text: /cisterna/i,
+    },
+    TWIST: {
+      name: "Portacontenedores",
+      parts: ["fml=1", "cat=32", "var=98"],
+      text: /contenedor|twist/i,
+    },
+    CARRILLEROS: {
+      name: "Transporte de caballos",
+      parts: ["fml=1", "cat=32", "var=131"],
+      text: /caballo|carrillero|transporte/i,
+    },
   };
 
-  const target = DEST[key];
+  let target = DEST[key];
+  if (!target) {
+    this._log(`⚠️ No hay mapping DEST para ${key}, uso TRACTO por defecto`, "warning");
+    key = "TRACTO";
+    target = DEST[key];
+  }
+
   this._log(`🎯 Categoría a abrir: ${key} → ${target?.name || "?"}`, "info");
 
-  // --- Buscar enlace ---
-  const matchesHref = (a, parts) => parts.every((p) => (a.getAttribute("href") || "").includes(p));
+  // --- Helper: match estricto de parámetros (sin confundir 74 con 741) ---
+  const matchesHrefStrict = (a, parts = []) => {
+    const href = a.getAttribute("href") || "";
+    return parts.every((p) => {
+      const [k, v] = p.split("=");
+      if (!k || v == null) return false;
+      const re = new RegExp(`[?&]${k}=${v}(?:&|$)`);
+      return re.test(href);
+    });
+  };
+
+  // --- Buscar enlace correcto ---
   const findLink = () => {
-    const links = Array.from(document.querySelectorAll('a[href*="/vehicle/new?"]'));
-    return (
-      links.find((a) => matchesHref(a, target.parts)) ||
-      links.find((a) => target.text.test((a.textContent || "").trim()))
-    ) || null;
+    const links = Array.from(document.querySelectorAll('a[href*="/vehicle/new"]'));
+
+    // 🔒 CASO ESPECIAL: BASCUL / VOLQUETE → SOLO "Volquete" (no vidrio)
+    if (key === "BASCUL" || key === "VOLQUETE") {
+      // 1) Intento exacto por params + texto Volquete y NO vidrio
+      const strictVolquete = links.find((a) => {
+        const txt = (a.textContent || "").trim().toLowerCase();
+        return (
+          matchesHrefStrict(a, target.parts || []) &&
+          txt.includes("volquete") &&
+          !txt.includes("vidrio")
+        );
+      });
+      if (strictVolquete) return strictVolquete;
+
+      // 2) Fallback solo por texto visible
+      const byTextOnly = links.find((a) => {
+        const txt = (a.textContent || "").trim().toLowerCase();
+        return txt.includes("volquete") && !txt.includes("vidrio");
+      });
+      if (byTextOnly) return byTextOnly;
+    }
+
+    // Resto de categorías
+    const byParams = links.find((a) => matchesHrefStrict(a, target.parts || []));
+    if (byParams) return byParams;
+
+    if (target.text) {
+      const re = target.text;
+      const byText = links.find((a) =>
+        re.test((a.textContent || "").trim())
+      );
+      if (byText) return byText;
+    }
+
+    return null;
   };
 
   let link = null;
@@ -2323,8 +2463,11 @@ async _seleccionarCategoria() {
 
   // --- Navegar ---
   const href = link.getAttribute("href");
-  const absolute = href?.startsWith("http") ? href : new URL(href, location.origin).href;
-  this._log(`🧭 Navegando a ${target.name}…`, "info");
+  const absolute = href?.startsWith("http")
+    ? href
+    : new URL(href, location.origin).href;
+
+  this._log(`🧭 Navegando a ${target.name}… (${absolute})`, "info");
   location.assign(absolute);
 
   // --- Esperar formulario ---
@@ -2341,8 +2484,6 @@ async _seleccionarCategoria() {
 
   return true;
 }
-
-
 
   // ====== PASO 3: Insertar datos ======
   async _insertarDatos() {
